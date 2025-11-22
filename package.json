@@ -1,0 +1,36 @@
+{
+  "name": "silicon-rider-bench",
+  "version": "1.0.0",
+  "description": "世界上首个多模态 Agent 基准测试项目，旨在评估单模态/多模态模型作为智能体的能力",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "level0.1": "tsx src/index.ts --level 0.1",
+    "level1": "tsx src/index.ts --level 1",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest --run --coverage"
+  },
+  "keywords": [
+    "ai",
+    "benchmark",
+    "agent",
+    "multimodal"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "openai": "^4.77.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "fast-check": "^3.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
