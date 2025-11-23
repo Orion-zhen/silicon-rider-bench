@@ -72,7 +72,7 @@ export function generateMap(config: MapConfig): GeneratedMap {
 }
 
 /**
- * Generate nodes with type distribution and positions
+ * Generate nodes using grid-based city street layout
  */
 function generateNodes(
   rng: SeededRNG,
@@ -95,30 +95,76 @@ function generateNodes(
   // Shuffle to randomize placement
   const shuffledTypes = rng.shuffle(nodeTypes);
   
-  // Generate positions for each node
+  // Create street grid - determine number of streets
+  const streetCount = Math.ceil(Math.sqrt(nodeCount * 1.5));
+  const streetSpacing = gridSize / (streetCount + 1);
+  
+  // Generate street coordinates (整数位置，确保间隔足够大)
+  const streets: { x: number[], y: number[] } = { x: [], y: [] };
+  
+  for (let i = 1; i <= streetCount; i++) {
+    const coord = Math.round(i * streetSpacing); // 使用整数坐标
+    streets.x.push(coord);
+    streets.y.push(coord);
+  }
+  
+  // Generate all possible intersection points
+  const intersections: Array<{ x: number; y: number; streetX: number; streetY: number }> = [];
+  for (const x of streets.x) {
+    for (const y of streets.y) {
+      intersections.push({ x, y, streetX: x, streetY: y });
+    }
+  }
+  
+  // Shuffle intersections for random placement
+  const shuffledIntersections = rng.shuffle(intersections);
+  
+  // Place nodes at intersections or along streets
   const usedPositions = new Set<string>();
   
   for (let i = 0; i < shuffledTypes.length; i++) {
     const type = shuffledTypes[i];
-    let position: { x: number; y: number };
-    let posKey: string;
     
-    // Find unique position
-    do {
-      position = {
-        x: rng.nextFloatRange(0, gridSize),
-        y: rng.nextFloatRange(0, gridSize),
-      };
-      posKey = `${position.x.toFixed(2)},${position.y.toFixed(2)}`;
-    } while (usedPositions.has(posKey));
+    // Try to find an unused intersection
+    let position: { x: number; y: number; streetX?: number; streetY?: number } | null = null;
     
-    usedPositions.add(posKey);
+    for (const intersection of shuffledIntersections) {
+      const posKey = `${intersection.x},${intersection.y}`;
+      
+      if (!usedPositions.has(posKey)) {
+        // Place at intersection - NO random offset to keep nodes on streets
+        position = {
+          x: intersection.x,
+          y: intersection.y,
+          streetX: intersection.streetX,
+          streetY: intersection.streetY,
+        };
+        usedPositions.add(posKey);
+        break;
+      }
+    }
+    
+    // If all intersections are used, place along a street
+    if (!position) {
+      const useXStreet = rng.nextFloat() < 0.5;
+      if (useXStreet) {
+        // Place on a vertical street (fixed X)
+        const streetX = streets.x[rng.nextInt(0, streets.x.length - 1)];
+        const y = rng.nextFloatRange(streetSpacing / 2, gridSize - streetSpacing / 2);
+        position = { x: streetX, y, streetX };
+      } else {
+        // Place on a horizontal street (fixed Y)
+        const streetY = streets.y[rng.nextInt(0, streets.y.length - 1)];
+        const x = rng.nextFloatRange(streetSpacing / 2, gridSize - streetSpacing / 2);
+        position = { x, y: streetY, streetY };
+      }
+    }
     
     const node: Node = {
       id: `node_${i}`,
-      type,
-      position,
-      name: generateNodeName(type, i),
+      type: shuffledTypes[i],
+      position: { x: position.x, y: position.y },
+      name: generateNodeName(shuffledTypes[i], i),
     };
     
     nodes.set(node.id, node);
@@ -190,7 +236,8 @@ function generateNodeName(type: NodeType, index: number): string {
 }
 
 /**
- * Generate edges connecting nodes using K-nearest neighbors approach
+ * Generate edges connecting nodes using grid-based street layout
+ * Creates a more realistic city street pattern with mostly horizontal and vertical streets
  */
 function generateEdges(
   rng: SeededRNG,
@@ -201,50 +248,125 @@ function generateEdges(
   const nodeArray = Array.from(nodes.values());
   const edgeSet = new Set<string>();
   
-  // For each node, connect to K nearest neighbors
-  const K = Math.min(3, nodeArray.length - 1); // Connect to 3 nearest neighbors
+  // Tolerance for considering nodes on the same street (must be very small now)
+  const streetTolerance = 0.5;
   
+  // Group nodes by X coordinate (vertical streets)
+  const nodesByXStreet = new Map<number, Node[]>();
   for (const node of nodeArray) {
-    // Calculate distances to all other nodes
+    const streetX = Math.round(node.position.x); // 四舍五入到整数
+    if (!nodesByXStreet.has(streetX)) {
+      nodesByXStreet.set(streetX, []);
+    }
+    nodesByXStreet.get(streetX)!.push(node);
+  }
+  
+  // Group nodes by Y coordinate (horizontal streets)
+  const nodesByYStreet = new Map<number, Node[]>();
+  for (const node of nodeArray) {
+    const streetY = Math.round(node.position.y); // 四舍五入到整数
+    if (!nodesByYStreet.has(streetY)) {
+      nodesByYStreet.set(streetY, []);
+    }
+    nodesByYStreet.get(streetY)!.push(node);
+  }
+  
+  // Connect nodes on the same vertical street
+  for (const [streetX, streetNodes] of nodesByXStreet) {
+    if (streetNodes.length < 2) continue;
+    
+    // Sort by Y coordinate
+    const sorted = streetNodes.sort((a, b) => a.position.y - b.position.y);
+    
+    // Connect adjacent nodes on this street
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const node = sorted[i];
+      const next = sorted[i + 1];
+      const distance = calculateEuclideanDistance(node.position, next.position);
+      
+      // Only connect if reasonably close
+      if (distance <= maxEdgeDistance) {
+        addEdge(edges, edgeSet, node.id, next.id, distance, rng);
+      }
+    }
+  }
+  
+  // Connect nodes on the same horizontal street
+  for (const [streetY, streetNodes] of nodesByYStreet) {
+    if (streetNodes.length < 2) continue;
+    
+    // Sort by X coordinate
+    const sorted = streetNodes.sort((a, b) => a.position.x - b.position.x);
+    
+    // Connect adjacent nodes on this street
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const node = sorted[i];
+      const next = sorted[i + 1];
+      const distance = calculateEuclideanDistance(node.position, next.position);
+      
+      // Only connect if reasonably close
+      if (distance <= maxEdgeDistance) {
+        addEdge(edges, edgeSet, node.id, next.id, distance, rng);
+      }
+    }
+  }
+  
+  // Add occasional diagonal connections (5% chance for each node)
+  for (const node of nodeArray) {
+    if (rng.nextFloat() > 0.05) continue; // Only 5% of nodes get diagonal connections
+    
     const distances = nodeArray
       .filter(other => other.id !== node.id)
       .map(other => ({
         node: other,
         distance: calculateEuclideanDistance(node.position, other.position),
+        dx: Math.abs(other.position.x - node.position.x),
+        dy: Math.abs(other.position.y - node.position.y),
       }))
+      .filter(d => {
+        // Only consider diagonal connections (not on same street)
+        return d.dx > streetTolerance && d.dy > streetTolerance;
+      })
       .sort((a, b) => a.distance - b.distance);
     
-    // Connect to K nearest neighbors
-    for (let i = 0; i < Math.min(K, distances.length); i++) {
-      const target = distances[i].node;
-      const distance = distances[i].distance;
-      
-      // Only create edge if within max distance
-      if (distance <= maxEdgeDistance) {
-        const edgeKey1 = `${node.id}-${target.id}`;
-        const edgeKey2 = `${target.id}-${node.id}`;
-        
-        // Avoid duplicate edges (undirected graph)
-        if (!edgeSet.has(edgeKey1) && !edgeSet.has(edgeKey2)) {
-          edgeSet.add(edgeKey1);
-          
-          const edge: Edge = {
-            from: node.id,
-            to: target.id,
-            distance,
-            baseCongestion: rng.nextFloatRange(0.1, 0.3),
-          };
-          
-          edges.push(edge);
-        }
+    // Add one diagonal connection to nearest diagonal neighbor
+    if (distances.length > 0) {
+      const { node: other, distance } = distances[0];
+      if (distance <= maxEdgeDistance * 0.8) {
+        addEdge(edges, edgeSet, node.id, other.id, distance, rng);
       }
     }
   }
   
-  // Ensure graph connectivity by adding additional edges if needed
+  // Ensure graph connectivity
   ensureConnectivity(rng, nodeArray, edges, edgeSet);
   
   return edges;
+}
+
+/**
+ * Helper function to add an edge
+ */
+function addEdge(
+  edges: Edge[],
+  edgeSet: Set<string>,
+  from: string,
+  to: string,
+  distance: number,
+  rng: SeededRNG
+): void {
+  const edgeKey1 = `${from}-${to}`;
+  const edgeKey2 = `${to}-${from}`;
+  
+  if (!edgeSet.has(edgeKey1) && !edgeSet.has(edgeKey2)) {
+    edgeSet.add(edgeKey1);
+    edges.push({
+      from,
+      to,
+      distance,
+      baseCongestion: rng.nextFloatRange(0.1, 0.3),
+    });
+  }
 }
 
 /**
