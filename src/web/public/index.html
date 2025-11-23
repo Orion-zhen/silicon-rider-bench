@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silicon Rider Bench - Web Visualization</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <!-- Connection Status Indicator -->
+    <div id="connection-status" class="connection-status disconnected">
+        <span class="status-dot"></span>
+        <span class="status-text">Disconnected</span>
+    </div>
+
+    <!-- Header -->
+    <header class="header">
+        <h1>🚴 Silicon Rider Bench</h1>
+        <p class="subtitle">AI Delivery Agent Simulation</p>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="container">
+        <!-- Map Area (Left/Center) -->
+        <main class="main-content">
+            <div id="map-container" class="map-container">
+                <!-- Map will be rendered here by JavaScript -->
+            </div>
+        </main>
+
+        <!-- Statistics Panel (Right) -->
+        <aside id="stats-panel" class="stats-panel">
+            <!-- Stats will be rendered here by JavaScript -->
+        </aside>
+    </div>
+
+    <!-- Conversation Panel (Bottom) -->
+    <footer id="chat-panel" class="chat-panel">
+        <!-- Chat will be rendered here by JavaScript -->
+    </footer>
+
+    <!-- JavaScript - Load dependencies first, then main -->
+    <script src="/js/map-renderer.js"></script>
+    <script src="/js/stats-panel.js"></script>
+    <script src="/js/chat-panel.js"></script>
+    <script src="/js/main.js"></script>
+</body>
+</html>

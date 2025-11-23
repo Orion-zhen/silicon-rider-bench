@@ -18,6 +18,7 @@ import { Simulator } from '../core/simulator';
 import { ToolCallRequest } from '../types';
 import { createToolRegistry } from '../tools';
 import { generateSystemPrompt } from './system-prompt';
+import type { WebVisualization } from '../web/web-visualization.js';
 
 // 加载环境变量
 dotenv.config();
@@ -68,15 +69,18 @@ export class AIClient {
   private toolDefinitions: any[];
   private conversationLogs: ConversationLogEntry[];
   private lastReadLogIndex: number;
+  private webVisualization?: WebVisualization;
 
   /**
    * 创建 AI 客户端实例
    * 
    * @param simulator 模拟器实例
    * @param config 客户端配置（可选，默认从环境变量加载）
+   * @param webVisualization Web 可视化适配器（可选，用于 Web 模式）
    */
-  constructor(simulator: Simulator, config?: Partial<AIClientConfig>) {
+  constructor(simulator: Simulator, config?: Partial<AIClientConfig>, webVisualization?: WebVisualization) {
     this.simulator = simulator;
+    this.webVisualization = webVisualization;
     
     // 加载配置
     this.config = this.loadConfig(config);
@@ -236,6 +240,11 @@ export class AIClient {
         
         this.conversationHistory.push(assistantMessage);
 
+        // 发送对话消息到 Web 客户端（如果启用了 Web 可视化）
+        if (this.webVisualization && message.content) {
+          this.webVisualization.sendConversation('assistant', message.content);
+        }
+
         // 正常模式：记录格式化的对话信息
         if (!isDebugMode) {
           const logContent = this.formatConversation(iteration, message);
@@ -249,6 +258,19 @@ export class AIClient {
 
         // 检查是否有工具调用
         if (message.tool_calls && message.tool_calls.length > 0) {
+          // 发送工具调用信息到 Web 客户端
+          if (this.webVisualization) {
+            for (const toolCall of message.tool_calls) {
+              try {
+                const args = JSON.parse(toolCall.function.arguments);
+                this.webVisualization.sendToolCall(toolCall.function.name, args);
+              } catch (error) {
+                // 如果参数解析失败，发送原始字符串
+                this.webVisualization.sendToolCall(toolCall.function.name, { raw: toolCall.function.arguments });
+              }
+            }
+          }
+
           // 处理工具调用
           const toolResults = await this.handleToolCalls(message.tool_calls);
 
@@ -260,6 +282,12 @@ export class AIClient {
               name: result.toolName,
               content: JSON.stringify(result.result),
             });
+
+            // 发送工具结果到 Web 客户端
+            if (this.webVisualization) {
+              const success = result.result.success !== false;
+              this.webVisualization.sendToolResult(result.toolName, success, result.result);
+            }
 
             // 正常模式：记录工具调用结果
             if (!isDebugMode) {
@@ -494,13 +522,15 @@ export class AIClient {
  * 
  * @param simulator 模拟器实例
  * @param config 客户端配置（可选）
+ * @param webVisualization Web 可视化适配器（可选）
  * @returns AI 客户端实例
  */
 export function createAIClient(
   simulator: Simulator,
-  config?: Partial<AIClientConfig>
+  config?: Partial<AIClientConfig>,
+  webVisualization?: WebVisualization
 ): AIClient {
-  return new AIClient(simulator, config);
+  return new AIClient(simulator, config, webVisualization);
 }
 
 // 导出 generateSystemPrompt 以保持向后兼容

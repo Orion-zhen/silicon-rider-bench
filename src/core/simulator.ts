@@ -212,6 +212,9 @@ export class Simulator {
             distance: order.distance,
             optimalDistance,
           });
+          
+          // 在终端输出订单完成信息（用于 Web 模式）
+          this.logOrderCompletion(order, payment, penalty, overtime, onTime);
         }
         
         // Level 0.1: 标记订单完成
@@ -506,6 +509,52 @@ export class Simulator {
       pathEfficiency,
       apiViolationRate,
     };
+  }
+
+  /**
+   * 记录订单完成信息到终端（用于 Web 模式）
+   */
+  private logOrderCompletion(
+    order: Order,
+    payment: number,
+    penalty: number,
+    overtime: number,
+    onTime: boolean
+  ): void {
+    // 只在非调试模式下输出（避免与 AI 客户端的详细日志冲突）
+    if (process.env.DEBUG === 'true') {
+      return;
+    }
+    
+    const statusIcon = onTime ? '✅' : '⏰';
+    const statusText = onTime ? '准时完成' : `超时${overtime.toFixed(1)}分钟`;
+    const orderTypeEmoji = this.getOrderTypeEmoji(order.type);
+    
+    console.log('\n' + '─'.repeat(70));
+    console.log(`${statusIcon} 订单完成: ${order.id} ${orderTypeEmoji}`);
+    console.log(`   配送费: ¥${order.deliveryFee.toFixed(2)}`);
+    console.log(`   实际收入: ¥${payment.toFixed(2)}`);
+    if (penalty > 0) {
+      console.log(`   超时罚款: -¥${penalty.toFixed(2)}`);
+    }
+    console.log(`   状态: ${statusText}`);
+    console.log('─'.repeat(70));
+  }
+
+  /**
+   * 获取订单类型的 emoji
+   */
+  private getOrderTypeEmoji(type: string): string {
+    switch (type) {
+      case 'food':
+        return '🍔';
+      case 'supermarket':
+        return '🛒';
+      case 'pharmacy':
+        return '💊';
+      default:
+        return '📦';
+    }
   }
 
   /**

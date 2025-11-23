@@ -11,94 +11,21 @@
  */
 
 import { Simulator } from './core/simulator';
-import { getLevelConfig, LevelName, isValidLevelName, printLevelConfig } from './levels/level-config';
+import { getLevelConfig, printLevelConfig } from './levels/level-config';
 import { createAIClient, generateSystemPrompt } from './client/ai-client';
 import { TerminalDisplay } from './visualization/terminal-display';
-import { ScoreCalculator } from './scoring/score-calculator';
 import { ReportGenerator } from './scoring/report-generator';
 import { formatStatusDisplay, formatHeader, formatSeparator } from './utils/cli-formatter';
+import { parseArgs } from './cli/args-parser';
+import { WebServer } from './web/web-server';
+import { WebVisualization } from './web/web-visualization';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 
-/**
- * 命令行参数接口
- */
-interface CLIArgs {
-  level: LevelName;
-  seed?: number;
-  modelName?: string;
-  noVisualization?: boolean;
-  outputFile?: string;
-  help?: boolean;
-}
-
-/**
- * 解析命令行参数
- */
-function parseArgs(): CLIArgs {
-  const args = process.argv.slice(2);
-  const parsed: Partial<CLIArgs> = {};
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-
-    switch (arg) {
-      case '--level':
-      case '-l':
-        const levelValue = args[++i];
-        if (levelValue === '0.1') {
-          parsed.level = 'level0.1';
-        } else if (levelValue === '1') {
-          parsed.level = 'level1';
-        } else if (isValidLevelName(levelValue)) {
-          parsed.level = levelValue as LevelName;
-        } else {
-          console.error(`Invalid level: ${levelValue}`);
-          process.exit(1);
-        }
-        break;
-
-      case '--seed':
-      case '-s':
-        parsed.seed = parseInt(args[++i], 10);
-        if (isNaN(parsed.seed)) {
-          console.error('Invalid seed value');
-          process.exit(1);
-        }
-        break;
-
-      case '--model':
-      case '-m':
-        parsed.modelName = args[++i];
-        break;
-
-      case '--no-viz':
-        parsed.noVisualization = true;
-        break;
-
-      case '--output':
-      case '-o':
-        parsed.outputFile = args[++i];
-        break;
-
-      case '--help':
-      case '-h':
-        parsed.help = true;
-        break;
-
-      default:
-        console.error(`Unknown argument: ${arg}`);
-        process.exit(1);
-    }
-  }
-
-  // 默认值
-  if (!parsed.level) {
-    parsed.level = 'level1';
-  }
-
-  return parsed as CLIArgs;
-}
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * 显示帮助信息
@@ -116,6 +43,9 @@ Silicon Rider Bench - AI 外卖骑手基准测试
   --level, -l <level>           指定 Level（0.1 或 1）
   --seed, -s <seed>             指定地图种子（覆盖默认值）
   --model, -m <model>           指定 AI 模型名称
+  --mode <mode>                 可视化模式（terminal 或 web，默认: terminal）
+  --host <host>                 Web 服务器主机地址（默认: localhost）
+  --port <port>                 Web 服务器端口号（默认: 3000）
   --no-viz                      禁用实时可视化
   --output, -o <file>           指定报告输出文件
   --help, -h                    显示此帮助信息
@@ -165,19 +95,79 @@ async function main(): Promise<void> {
     const simulator = new Simulator(config);
     console.log('✓ 模拟器初始化完成\n');
 
-    // 初始化可视化（如果启用）
+    // 初始化 Web 服务器（如果是 Web 模式）
+    let webServer: WebServer | null = null;
+    let webVisualization: WebVisualization | null = null;
+    if (args.mode === 'web') {
+      const staticDir = path.join(__dirname, 'web', 'public');
+      webServer = new WebServer({
+        host: args.host,
+        port: args.port,
+        staticDir,
+      });
+
+      try {
+        await webServer.start();
+        const url = `http://${args.host}:${args.port}`;
+        console.log('✓ Web 服务器已启动');
+        console.log(`  访问 URL: ${url}\n`);
+
+        // 创建 Web 可视化适配器
+        webVisualization = new WebVisualization(simulator, webServer);
+        
+        // 当新客户端连接时，发送初始化数据
+        webServer.onConnection(() => {
+          console.log('✓ 新客户端连接，发送初始化数据');
+          webVisualization!.sendInitialData();
+        });
+        
+        console.log('✓ Web 可视化模块已启用\n');
+      } catch (error) {
+        if (error instanceof Error) {
+          if ('code' in error) {
+            const nodeError = error as NodeJS.ErrnoException;
+            switch (nodeError.code) {
+              case 'EADDRINUSE':
+                console.error(`❌ 错误: 端口 ${args.port} 已被占用`);
+                console.error(`   请尝试使用其他端口: --port <端口号>`);
+                console.error(`   例如: --port ${args.port + 1}\n`);
+                break;
+              case 'EACCES':
+                console.error(`❌ 错误: 没有权限绑定到端口 ${args.port}`);
+                console.error(`   端口 1-1023 需要管理员/root 权限`);
+                console.error(`   请尝试使用更高的端口号 (>1024)\n`);
+                break;
+              case 'EADDRNOTAVAIL':
+                console.error(`❌ 错误: 无法绑定到地址 ${args.host}`);
+                console.error(`   请检查主机地址是否正确\n`);
+                break;
+              default:
+                console.error('❌ Web 服务器启动失败:', error.message);
+                console.error(`   错误代码: ${nodeError.code}\n`);
+            }
+          } else {
+            console.error('❌ Web 服务器启动失败:', error.message);
+          }
+        } else {
+          console.error('❌ Web 服务器启动失败:', error);
+        }
+        process.exit(1);
+      }
+    }
+
+    // 初始化终端可视化（如果是终端模式且启用）
     let display: TerminalDisplay | null = null;
-    if (!args.noVisualization) {
+    if (args.mode === 'terminal' && !args.noVisualization) {
       display = new TerminalDisplay(simulator, {
         updateInterval: 500, // 每 500ms 更新一次
       });
-      console.log('✓ 可视化模块已启用\n');
+      console.log('✓ 终端可视化模块已启用\n');
     }
 
     // 初始化 AI 客户端
     console.log('正在初始化 AI 客户端...');
     const clientConfig = args.modelName ? { modelName: args.modelName } : undefined;
-    const aiClient = createAIClient(simulator, clientConfig);
+    const aiClient = createAIClient(simulator, clientConfig, webVisualization || undefined);
     console.log('✓ AI 客户端初始化完成');
     console.log(`  模型: ${aiClient.getConfig().modelName}\n`);
 
@@ -200,6 +190,8 @@ async function main(): Promise<void> {
     await aiClient.runConversationLoop((iteration, message) => {
       // 更新可视化
       const now = Date.now();
+      
+      // 终端模式：更新终端显示
       if (display && now - lastDisplayUpdate >= displayInterval) {
         display.display();
         
@@ -209,8 +201,20 @@ async function main(): Promise<void> {
         lastDisplayUpdate = now;
       }
 
+      // Web 模式：发送状态更新到客户端
+      if (webVisualization && now - lastDisplayUpdate >= displayInterval) {
+        webVisualization.sendStateUpdate();
+        lastDisplayUpdate = now;
+      }
+
+      // Web 模式：在终端输出关键事件
+      if (args.mode === 'web') {
+        // 打印对话日志（包含工具调用和结果）
+        aiClient.printNewConversationLogs();
+      }
+
       // 打印格式化的状态信息（如果禁用了可视化）
-      if (!display) {
+      if (!display && args.mode === 'terminal') {
         console.log(formatStatusDisplay(simulator, iteration, message));
         
         // 也打印对话日志
@@ -258,11 +262,23 @@ async function main(): Promise<void> {
     console.log(report);
     console.log(formatSeparator('═'));
 
+    // 发送模拟结束消息到 Web 客户端
+    if (webVisualization) {
+      webVisualization.sendSimulationEnd(report);
+    }
+
     // 保存报告到文件
     const outputFile = args.outputFile || `report-${args.level}-${Date.now()}.md`;
     const outputPath = path.resolve(outputFile);
     fs.writeFileSync(outputPath, report, 'utf-8');
     console.log(`\n✓ 报告已保存到: ${outputPath}\n`);
+
+    // 关闭 Web 服务器（如果启用）
+    if (webServer) {
+      console.log('正在关闭 Web 服务器...');
+      await webServer.stop();
+      console.log('✓ Web 服务器已关闭\n');
+    }
 
   } catch (error) {
     console.error('\n❌ 错误:', error);

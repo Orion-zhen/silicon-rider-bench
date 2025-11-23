@@ -103,6 +103,106 @@ npm run dev -- --level 1 --seed 42 --model openai/gpt-4 --output gpt4-result.md
 npm run dev -- --help
 ```
 
+### Web 可视化模式
+
+Silicon Rider Bench 支持基于浏览器的实时可视化界面，提供更直观的模拟过程展示。
+
+#### 启动 Web 模式
+
+```bash
+# 使用默认配置启动 Web 模式（localhost:3000）
+npm run dev -- --level 1 --mode web
+
+# 指定自定义主机和端口
+npm run dev -- --level 1 --mode web --host 0.0.0.0 --port 8080
+
+# Web 模式下运行 Level 0.1
+npm run dev -- --level 0.1 --mode web
+```
+
+启动后，终端会显示访问 URL：
+
+```
+🌐 Web server started at http://localhost:3000
+📊 Open this URL in your browser to view the simulation
+```
+
+#### Web 界面功能
+
+Web 界面分为三个主要区域：
+
+**1. 地图区域（左侧/中央）**
+- 🗺️ 显示完整的模拟世界地图
+- 📍 使用 emoji 图标表示不同类型的位置：
+  - 🍔 餐厅
+  - 🏠 住宅
+  - 🏢 办公室
+  - 🛒 超市
+  - 💊 药店
+  - 🔋 换电站
+- 🚴 实时显示骑手当前位置
+- 📐 网格背景显示空间结构
+
+**2. 统计面板（右侧）**
+- ⏰ 当前游戏时间
+- 🔋 骑手电量百分比
+- 💰 当前利润金额
+- 📦 携带订单数量和重量
+- ✅ 已完成订单数量
+- 📋 背包中的订单详细列表（ID、类型、重量、截止时间）
+
+**3. 对话面板（底部）**
+- 💭 AI 的思考过程和推理文本
+- 🔧 工具调用信息（工具名称和参数）
+- 📥 工具调用返回结果
+- 🔄 自动滚动到最新消息
+
+#### Web 模式特性
+
+- **实时更新**：通过 WebSocket 实现毫秒级的状态同步
+- **连接状态指示**：界面右上角显示连接状态（🟢 已连接 / 🔴 已断开）
+- **自动重连**：WebSocket 断开时自动尝试重新连接
+- **响应式布局**：适配不同屏幕尺寸
+- **终端日志保留**：Web 模式下终端仍然输出关键事件和最终报告
+
+#### Web 模式 vs 终端模式
+
+| 特性 | 终端模式 | Web 模式 |
+|------|---------|---------|
+| 可视化方式 | 终端字符界面 | 浏览器图形界面 |
+| 实时更新 | 逐行刷新 | WebSocket 推送 |
+| 地图显示 | ASCII 字符 | Emoji 图标 + 网格 |
+| 对话展示 | 滚动文本 | 结构化气泡 |
+| 多设备查看 | ❌ | ✅（同一网络） |
+| 性能影响 | 低 | 低（异步推送） |
+| 模拟结果 | 完全一致 | 完全一致 |
+
+#### 技术细节
+
+- **服务器**：基于 Node.js 内置 `http` 模块和 `ws` 库
+- **客户端**：原生 HTML5 + CSS3 + JavaScript（无框架依赖）
+- **通信协议**：WebSocket（双向实时通信）
+- **静态资源**：位于 `src/web/public/` 目录
+- **浏览器兼容性**：支持所有现代浏览器（Chrome 16+, Firefox 11+, Safari 7+, Edge）
+
+#### 故障排除
+
+**端口已被占用**
+```bash
+# 使用其他端口
+npm run dev -- --level 1 --mode web --port 3001
+```
+
+**无法访问 Web 界面**
+- 检查防火墙设置
+- 确认浏览器支持 WebSocket
+- 查看终端输出的访问 URL 是否正确
+
+**连接断开**
+- Web 界面会自动尝试重连
+- 检查网络连接
+- 刷新浏览器页面
+
 ### 命令行选项
 
 | 选项 | 简写 | 说明 | 默认值 |
@@ -110,6 +210,9 @@ npm run dev -- --help
 | `--level` | `-l` | 指定关卡（0.1 或 1） | 1 |
 | `--seed` | `-s` | 指定地图种子 | Level 配置默认值 |
 | `--model` | `-m` | 指定 AI 模型名称 | .env 中的 MODEL_NAME |
+| `--mode` | - | 可视化模式（terminal 或 web） | terminal |
+| `--host` | - | Web 服务器主机地址（仅 Web 模式） | localhost |
+| `--port` | - | Web 服务器端口号（仅 Web 模式） | 3000 |
 | `--no-viz` | - | 禁用实时可视化 | false |
 | `--output` | `-o` | 指定报告输出文件 | report.md |
 | `--help` | `-h` | 显示帮助信息 | - |
@@ -563,8 +666,23 @@ silicon-rider-bench/
 │   │   └── action-tools.ts      # 行动工具
 │   ├── client/                  # AI 客户端
 │   │   └── ai-client.ts         # OpenAI SDK 集成
-│   ├── visualization/           # 可视化模块
+│   ├── cli/                     # 命令行参数解析
+│   │   └── args-parser.ts       # 参数解析器
+│   ├── visualization/           # 终端可视化模块
 │   │   └── terminal-display.ts  # 终端显示
+│   ├── web/                     # Web 可视化模块
+│   │   ├── web-server.ts        # Web 服务器
+│   │   ├── web-visualization.ts # Web 可视化适配器
+│   │   ├── types.ts             # WebSocket 消息类型
+│   │   └── public/              # 静态资源
+│   │       ├── index.html       # 主页面
+│   │       ├── css/
+│   │       │   └── style.css    # 样式表
+│   │       └── js/
+│   │           ├── main.js      # 主逻辑
+│   │           ├── map-renderer.js    # 地图渲染
+│   │           ├── stats-panel.js     # 统计面板
+│   │           └── chat-panel.js      # 对话面板
 │   ├── scoring/                 # 评分模块
 │   │   ├── score-calculator.ts  # 评分计算
 │   │   └── report-generator.ts  # 报告生成
