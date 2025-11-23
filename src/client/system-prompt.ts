@@ -48,6 +48,7 @@ ${isLevel01
 ### 信息查询类
 - **get_my_status()**: 查询当前状态（位置、电量、订单、利润等）
 - **search_nearby_orders(radius)**: 搜索指定半径内的可用订单
+- **search_nearby_battery_stations(radius)**: 搜索指定半径内的换电站
 - **get_location_info(locationId)**: 获取位置详细信息
 - **calculate_distance(fromId, toId)**: 计算两点间最短距离
 - **estimate_time(locationIds)**: 估算路径通行时间（考虑拥堵）
@@ -72,6 +73,7 @@ ${isLevel01
    - 5-10 分钟：扣除 30% 配送费
    - 10-15 分钟：扣除 50% 配送费
    - 15 分钟以上：扣除 70% 配送费
+   - 注意: 如果电量耗尽, 以推行的速度配送, 会有很大概率导致超时
 5. **拥堵影响**：道路拥堵会降低速度（30/25/20/15 km/h）
 6. **订单潮汐**：不同时段不同类型订单频率不同
 
@@ -82,10 +84,21 @@ ${isLevel01
 - 考虑订单时限，避免超时
 - 在订单密集时段多接单
 
+## 配送流程（必须严格遵守）
+完成一个订单的完整流程：
+1. **search_nearby_orders** - 搜索可用订单
+2. **accept_order** - 接受订单
+3. **move_to** - 移动到取餐点
+4. **pickup_food** - 取餐（必须调用此工具！）
+5. **move_to** - 移动到送餐点
+6. **deliver_food** - 送餐（必须调用此工具才能获得配送费！）
+
+⚠️ **重要**：移动到送餐点后，**必须调用 deliver_food 工具**才能完成订单并获得配送费。仅仅移动到送餐点是不够的！
+
 ## 开始任务
 ${isLevel01
-  ? '请依次调用工具完成配送：search_nearby_orders → accept_order → move_to → pickup_food → move_to → deliver_food'
-  : '请开始配送任务，通过调用工具来最大化利润。'
+  ? '请严格按照上述流程调用工具完成配送。记住：到达送餐点后必须调用 deliver_food 工具！'
+  : '请开始配送任务，通过调用工具来最大化利润。记住：每个订单都必须调用 deliver_food 才能获得配送费！'
 }
 `.trim();
 

@@ -206,11 +206,18 @@ export class AIClient {
 
         const message = choice.message;
 
-        // 添加助手消息到历史
-        this.conversationHistory.push({
+        // 添加助手消息到历史（包含 tool_calls 如果有的话）
+        const assistantMessage: any = {
           role: 'assistant',
           content: message.content || '',
-        });
+        };
+        
+        // 如果有工具调用，也要添加到历史中
+        if (message.tool_calls && message.tool_calls.length > 0) {
+          assistantMessage.tool_calls = message.tool_calls;
+        }
+        
+        this.conversationHistory.push(assistantMessage);
 
         // 检查是否有工具调用
         if (message.tool_calls && message.tool_calls.length > 0) {

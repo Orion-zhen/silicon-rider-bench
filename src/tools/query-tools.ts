@@ -9,6 +9,7 @@ import {
   ToolCallResponse,
   GetMyStatusResponse,
   SearchNearbyOrdersResponse,
+  SearchNearbyBatteryStationsResponse,
   GetLocationInfoResponse,
   CalculateDistanceResponse,
   EstimateTimeResponse,
@@ -121,6 +122,92 @@ export const searchNearbyOrdersTool: ToolDefinition = {
     return {
       success: true,
       data: { orders },
+    };
+  },
+};
+
+/**
+ * 搜索附近的换电站
+ */
+export const searchNearbyBatteryStationsTool: ToolDefinition = {
+  name: 'search_nearby_battery_stations',
+  description: '搜索指定半径内的所有换电站',
+  parameters: {
+    radius: {
+      type: 'number',
+      required: true,
+      description: '搜索半径（km）',
+      min: 0,
+    },
+  },
+  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<SearchNearbyBatteryStationsResponse>> => {
+    const { agentState, pathfinder, nodes, congestionManager, currentTime } = context;
+    const radius = params.radius as number;
+
+    // 获取智能体当前位置
+    const agentPosition = agentState.getPosition();
+
+    // 查找所有换电站
+    const batteryStations = Array.from(nodes.values()).filter(
+      node => node.type === 'battery_swap'
+    );
+
+    // 计算距离并筛选在半径内的换电站
+    const nearbyStations = batteryStations
+      .map(station => {
+        const distanceResult = pathfinder.calculateDistance(agentPosition, station.id);
+        if (!distanceResult) {
+          return null;
+        }
+
+        const distance = distanceResult.distance;
+        if (distance > radius) {
+          return null;
+        }
+
+        // 估算到达时间
+        const path = distanceResult.path;
+        let totalTime = 0;
+
+        for (let i = 0; i < path.length - 1; i++) {
+          const from = path[i];
+          const to = path[i + 1];
+          const edgeId = `${from}-${to}`;
+          const reverseEdgeId = `${to}-${from}`;
+
+          // 获取拥堵程度
+          const congestionMap = congestionManager.updateCongestion(currentTime);
+          const congestion = congestionMap.get(edgeId) || congestionMap.get(reverseEdgeId) || 0;
+
+          // 计算速度
+          let speed = 30; // 默认速度
+          if (congestion < 0.3) speed = 30;
+          else if (congestion < 0.5) speed = 25;
+          else if (congestion < 0.7) speed = 20;
+          else speed = 15;
+
+          // 计算这一段的距离
+          const segmentResult = pathfinder.calculateDistance(from, to);
+          if (segmentResult) {
+            const segmentDistance = segmentResult.distance;
+            totalTime += (segmentDistance / speed) * 60; // 转换为分钟
+          }
+        }
+
+        return {
+          id: station.id,
+          name: station.name,
+          distance,
+          estimatedTime: totalTime,
+          position: station.position,
+        };
+      })
+      .filter((station): station is NonNullable<typeof station> => station !== null)
+      .sort((a, b) => a.distance - b.distance); // 按距离排序
+
+    return {
+      success: true,
+      data: { stations: nearbyStations },
     };
   },
 };
@@ -351,6 +438,7 @@ export function getQueryTools(): ToolDefinition[] {
   return [
     getMyStatusTool,
     searchNearbyOrdersTool,
+    searchNearbyBatteryStationsTool,
     getLocationInfoTool,
     calculateDistanceTool,
     estimateTimeTool,

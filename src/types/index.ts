@@ -200,6 +200,19 @@ export interface SearchNearbyOrdersResponse {
 }
 
 /**
+ * search_nearby_battery_stations 响应
+ */
+export interface SearchNearbyBatteryStationsResponse {
+  stations: Array<{
+    id: string;
+    name: string;
+    distance: number;  // km
+    estimatedTime: number;  // 分钟
+    position: { x: number; y: number };
+  }>;
+}
+
+/**
  * get_location_info 响应
  */
 export interface GetLocationInfoResponse {

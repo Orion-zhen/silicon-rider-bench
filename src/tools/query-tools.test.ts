@@ -12,6 +12,7 @@ import { Node, Edge } from '../types';
 import {
   getMyStatusTool,
   searchNearbyOrdersTool,
+  searchNearbyBatteryStationsTool,
   getLocationInfoTool,
   calculateDistanceTool,
   estimateTimeTool,
@@ -126,6 +127,61 @@ describe('Query Tools', () => {
         expect(order).toHaveProperty('deliveryLocation');
         expect(order).toHaveProperty('distance');
         expect(order).toHaveProperty('estimatedTimeLimit');
+      }
+    });
+  });
+
+  describe('search_nearby_battery_stations', () => {
+    it('should return battery stations within radius', async () => {
+      const result = await searchNearbyBatteryStationsTool.handler({ radius: 100 }, context);
+      
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(Array.isArray(result.data.stations)).toBe(true);
+        // 验证返回的都是换电站
+        result.data.stations.forEach(station => {
+          const node = nodes.get(station.id);
+          expect(node?.type).toBe('battery_swap');
+        });
+      }
+    });
+
+    it('should return empty array when no stations in radius', async () => {
+      const result = await searchNearbyBatteryStationsTool.handler({ radius: 0.001 }, context);
+      
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.stations).toHaveLength(0);
+      }
+    });
+
+    it('should include all required station fields', async () => {
+      const result = await searchNearbyBatteryStationsTool.handler({ radius: 100 }, context);
+      
+      expect(result.success).toBe(true);
+      if (result.success && result.data.stations.length > 0) {
+        const station = result.data.stations[0];
+        expect(station).toHaveProperty('id');
+        expect(station).toHaveProperty('name');
+        expect(station).toHaveProperty('distance');
+        expect(station).toHaveProperty('estimatedTime');
+        expect(station).toHaveProperty('position');
+        expect(typeof station.distance).toBe('number');
+        expect(typeof station.estimatedTime).toBe('number');
+      }
+    });
+
+    it('should sort stations by distance', async () => {
+      const result = await searchNearbyBatteryStationsTool.handler({ radius: 100 }, context);
+      
+      expect(result.success).toBe(true);
+      if (result.success && result.data.stations.length > 1) {
+        // 验证按距离排序
+        for (let i = 0; i < result.data.stations.length - 1; i++) {
+          expect(result.data.stations[i].distance).toBeLessThanOrEqual(
+            result.data.stations[i + 1].distance
+          );
+        }
       }
     });
   });
