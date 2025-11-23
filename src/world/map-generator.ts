@@ -45,7 +45,7 @@ const MAP_SIZE_CONFIG = {
     maxEdgeDistance: 3,
   },
   large: {
-    nodeCount: 50,
+    nodeCount: 100,
     gridSize: 15,
     maxEdgeDistance: 5,
   },

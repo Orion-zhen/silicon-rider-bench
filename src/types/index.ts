@@ -170,11 +170,21 @@ export interface GetMyStatusResponse {
   position: string;
   battery: number;
   batteryRange: number;  // 剩余续航 km
+  acceptedOrders: Array<{
+    id: string;
+    type: string;
+    weight: number;
+    deadline: number;
+    pickupLocation: string;
+    deliveryLocation: string;
+  }>;
   carriedOrders: Array<{
     id: string;
     type: string;
     weight: number;
     deadline: number;
+    pickupLocation: string;
+    deliveryLocation: string;
   }>;
   totalWeight: number;
   remainingCapacity: number;  // 10 - totalWeight

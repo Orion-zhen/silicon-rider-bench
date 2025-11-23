@@ -95,9 +95,9 @@ describe('Help Tool', () => {
       
       // 检查是否包含策略建议
       expect(helpText).toContain('策略建议');
-      expect(helpText).toContain('优先接受');
       expect(helpText).toContain('合理规划');
-      expect(helpText).toContain('注意电量');
+      expect(helpText).toContain('注意评估电量');
+      expect(helpText).toContain('考虑订单时限');
     });
 
     it('should return error if simulator is not available', async () => {

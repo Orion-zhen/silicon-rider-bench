@@ -46,6 +46,16 @@ export interface ChatMessage {
 }
 
 /**
+ * 对话日志条目
+ */
+export interface ConversationLogEntry {
+  iteration: number;
+  type: 'assistant' | 'tool';
+  content: string;
+  timestamp: number;
+}
+
+/**
  * AI 客户端类
  * 
  * 负责与 OpenAI SDK 交互，管理对话循环，处理工具调用
@@ -56,6 +66,8 @@ export class AIClient {
   private simulator: Simulator;
   private conversationHistory: ChatMessage[];
   private toolDefinitions: any[];
+  private conversationLogs: ConversationLogEntry[];
+  private lastReadLogIndex: number;
 
   /**
    * 创建 AI 客户端实例
@@ -81,6 +93,10 @@ export class AIClient {
     
     // 初始化对话历史
     this.conversationHistory = [];
+    
+    // 初始化对话日志
+    this.conversationLogs = [];
+    this.lastReadLogIndex = 0;
     
     // 生成工具定义
     this.toolDefinitions = this.generateToolDefinitions();
@@ -166,6 +182,7 @@ export class AIClient {
   ): Promise<void> {
     let iteration = 0;
     const maxIterations = this.config.maxIterations || 300;
+    const isDebugMode = process.env.DEBUG === 'true';
 
     while (!this.simulator.shouldTerminate() && iteration < maxIterations) {
       iteration++;
@@ -176,12 +193,12 @@ export class AIClient {
           model: this.config.modelName,
           messages: this.conversationHistory as any,
           tools: this.toolDefinitions,
-          tool_choice: 'auto',
+          tool_choice: 'auto' as const,
           temperature: this.config.temperature,
         };
 
         // Debug: 输出请求详情
-        if (process.env.DEBUG === 'true') {
+        if (isDebugMode) {
           console.log('\n=== AI Request ===');
           console.log('Model:', requestBody.model);
           console.log('Messages:', JSON.stringify(requestBody.messages, null, 2));
@@ -193,7 +210,7 @@ export class AIClient {
         const response = await this.client.chat.completions.create(requestBody);
 
         // Debug: 输出响应详情
-        if (process.env.DEBUG === 'true') {
+        if (isDebugMode) {
           console.log('\n=== AI Response ===');
           console.log('Response:', JSON.stringify(response, null, 2));
           console.log('===================\n');
@@ -219,6 +236,17 @@ export class AIClient {
         
         this.conversationHistory.push(assistantMessage);
 
+        // 正常模式：记录格式化的对话信息
+        if (!isDebugMode) {
+          const logContent = this.formatConversation(iteration, message);
+          this.conversationLogs.push({
+            iteration,
+            type: 'assistant',
+            content: logContent,
+            timestamp: Date.now(),
+          });
+        }
+
         // 检查是否有工具调用
         if (message.tool_calls && message.tool_calls.length > 0) {
           // 处理工具调用
@@ -232,6 +260,17 @@ export class AIClient {
               name: result.toolName,
               content: JSON.stringify(result.result),
             });
+
+            // 正常模式：记录工具调用结果
+            if (!isDebugMode) {
+              const logContent = this.formatToolResult(iteration, result);
+              this.conversationLogs.push({
+                iteration,
+                type: 'tool',
+                content: logContent,
+                timestamp: Date.now(),
+              });
+            }
           }
 
           // 回调
@@ -272,6 +311,98 @@ export class AIClient {
     // 检查终止原因
     if (iteration >= maxIterations) {
       console.warn(`Reached maximum iterations (${maxIterations})`);
+    }
+  }
+
+  /**
+   * 格式化对话信息（正常模式）
+   * 
+   * @param iteration 对话轮次
+   * @param message AI 响应消息
+   * @returns 格式化的字符串
+   */
+  private formatConversation(
+    iteration: number,
+    message: OpenAI.Chat.Completions.ChatCompletionMessage
+  ): string {
+    let output = '';
+    output += '\n' + '='.repeat(80) + '\n';
+    output += `[对话轮次 #${iteration}] ASSISTANT\n`;
+    output += '='.repeat(80) + '\n';
+
+    // 打印 content
+    if (message.content) {
+      output += '\n【Content】\n';
+      output += message.content + '\n';
+    }
+
+    // 打印 tool_calls
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      output += '\n【Tool Calls】\n';
+      message.tool_calls.forEach((toolCall, index) => {
+        output += `\n  [${index + 1}] ${toolCall.function.name}\n`;
+        output += '  Arguments:\n';
+        try {
+          const args = JSON.parse(toolCall.function.arguments);
+          output += JSON.stringify(args, null, 4).split('\n').map(line => '    ' + line).join('\n') + '\n';
+        } catch {
+          output += '    ' + toolCall.function.arguments + '\n';
+        }
+      });
+    }
+
+    output += '\n' + '='.repeat(80) + '\n';
+    return output;
+  }
+
+  /**
+   * 格式化工具调用结果（正常模式）
+   * 
+   * @param iteration 对话轮次
+   * @param result 工具调用结果
+   * @returns 格式化的字符串
+   */
+  private formatToolResult(
+    iteration: number,
+    result: { toolCallId: string; toolName: string; result: any }
+  ): string {
+    let output = '';
+    output += '\n' + '-'.repeat(80) + '\n';
+    output += `[对话轮次 #${iteration}] TOOL: ${result.toolName}\n`;
+    output += '-'.repeat(80) + '\n';
+    output += '\n【Result】\n';
+    output += JSON.stringify(result.result, null, 2) + '\n';
+    output += '\n' + '-'.repeat(80) + '\n';
+    return output;
+  }
+
+  /**
+   * 获取新的对话日志（自上次读取以来的新日志）
+   * 
+   * @returns 新的对话日志数组
+   */
+  getNewConversationLogs(): ConversationLogEntry[] {
+    const newLogs = this.conversationLogs.slice(this.lastReadLogIndex);
+    this.lastReadLogIndex = this.conversationLogs.length;
+    return newLogs;
+  }
+
+  /**
+   * 获取所有对话日志
+   * 
+   * @returns 所有对话日志数组
+   */
+  getAllConversationLogs(): ConversationLogEntry[] {
+    return [...this.conversationLogs];
+  }
+
+  /**
+   * 打印新的对话日志
+   */
+  printNewConversationLogs(): void {
+    const newLogs = this.getNewConversationLogs();
+    for (const log of newLogs) {
+      console.log(log.content);
     }
   }
 

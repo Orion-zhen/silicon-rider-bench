@@ -49,17 +49,36 @@ export const getMyStatusTool: ToolDefinition = {
   handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<GetMyStatusResponse>> => {
     const { agentState, currentTime } = context;
 
-    const carriedOrders = agentState.getCarriedOrders().map(order => ({
-      id: order.id,
-      type: order.type,
-      weight: order.weight,
-      deadline: order.deadline || 0,
-    }));
+    const allOrders = agentState.getCarriedOrders();
+    
+    // 分离已接受但未取餐的订单和已取餐的订单
+    const acceptedOrders = allOrders
+      .filter(order => !order.pickedUp)
+      .map(order => ({
+        id: order.id,
+        type: order.type,
+        weight: order.weight,
+        deadline: order.deadline || 0,
+        pickupLocation: order.pickupLocation,
+        deliveryLocation: order.deliveryLocation,
+      }));
+
+    const carriedOrders = allOrders
+      .filter(order => order.pickedUp && !order.delivered)
+      .map(order => ({
+        id: order.id,
+        type: order.type,
+        weight: order.weight,
+        deadline: order.deadline || 0,
+        pickupLocation: order.pickupLocation,
+        deliveryLocation: order.deliveryLocation,
+      }));
 
     const response: GetMyStatusResponse = {
       position: agentState.getPosition(),
       battery: agentState.getBattery(),
       batteryRange: agentState.getBatteryRange(),
+      acceptedOrders,
       carriedOrders,
       totalWeight: agentState.getTotalWeight(),
       remainingCapacity: agentState.getRemainingCapacity(),

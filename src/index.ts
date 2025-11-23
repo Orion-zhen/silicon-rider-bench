@@ -202,12 +202,19 @@ async function main(): Promise<void> {
       const now = Date.now();
       if (display && now - lastDisplayUpdate >= displayInterval) {
         display.display();
+        
+        // 在地图渲染后，打印新的对话日志
+        aiClient.printNewConversationLogs();
+        
         lastDisplayUpdate = now;
       }
 
       // 打印格式化的状态信息（如果禁用了可视化）
       if (!display) {
         console.log(formatStatusDisplay(simulator, iteration, message));
+        
+        // 也打印对话日志
+        aiClient.printNewConversationLogs();
       }
     });
 

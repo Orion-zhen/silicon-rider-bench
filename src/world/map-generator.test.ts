@@ -115,7 +115,9 @@ describe('Map Generator', () => {
       expect(typeCounts.office / totalNodes).toBeGreaterThanOrEqual(0.05);
       expect(typeCounts.office / totalNodes).toBeLessThanOrEqual(0.20);
       
-      expect(typeCounts.battery_swap / totalNodes).toBeGreaterThanOrEqual(0.02);
+      // 换电站至少要有 1 个，所以最小比例是 1/nodeCount
+      // 对于 100 个节点的地图，最小比例是 0.01
+      expect(typeCounts.battery_swap / totalNodes).toBeGreaterThanOrEqual(0.01);
       expect(typeCounts.battery_swap / totalNodes).toBeLessThanOrEqual(0.15);
     });
     
@@ -126,7 +128,7 @@ describe('Map Generator', () => {
     
     it('should generate correct number of nodes for large maps', () => {
       const map = generateMap({ seed: 12345, size: 'large' });
-      expect(map.nodes.size).toBe(50);
+      expect(map.nodes.size).toBe(100);
     });
   });
   
@@ -216,7 +218,7 @@ describe('Map Generator', () => {
     it('should generate large maps with correct parameters', () => {
       const map = generateMap({ seed: 67890, size: 'large' });
       
-      expect(map.nodes.size).toBe(50);
+      expect(map.nodes.size).toBe(100);
       expect(map.seed).toBe(67890);
       
       // Check positions are within grid bounds
