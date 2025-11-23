@@ -249,6 +249,7 @@ export interface MoveToResponse {
   timeCost: number;       // 分钟
   batteryCost: number;    // %
   newPosition: string;
+  distance?: number;      // 移动距离（km）
   pushedDistance?: number; // 如果途中没电，推行的距离
 }
 

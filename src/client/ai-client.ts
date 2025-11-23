@@ -17,6 +17,7 @@ import dotenv from 'dotenv';
 import { Simulator } from '../core/simulator';
 import { ToolCallRequest } from '../types';
 import { createToolRegistry } from '../tools';
+import { generateSystemPrompt } from './system-prompt';
 
 // 加载环境变量
 dotenv.config();
@@ -93,10 +94,15 @@ export class AIClient {
    * @returns 完整配置
    */
   private loadConfig(config?: Partial<AIClientConfig>): AIClientConfig {
-    const apiKey = config?.apiKey || process.env.OPENROUTER_API_KEY;
+    const apiKey = config?.apiKey || process.env.API_KEY;
     if (!apiKey) {
-      throw new Error('OPENROUTER_API_KEY is required. Please set it in .env file.');
+      throw new Error('API_KEY is required. Please set it in .env file.');
     }
+
+    // 解析最大迭代次数，支持从环境变量读取
+    const maxIterationsFromEnv = process.env.MAX_ITERATIONS 
+      ? parseInt(process.env.MAX_ITERATIONS, 10) 
+      : undefined;
 
     return {
       apiKey,
@@ -104,7 +110,7 @@ export class AIClient {
       baseURL: config?.baseURL || process.env.BASE_URL || 'https://openrouter.ai/api/v1',
       siteURL: config?.siteURL || process.env.SITE_URL,
       appName: config?.appName || process.env.APP_NAME || 'Silicon Rider Bench',
-      maxIterations: config?.maxIterations || 100,
+      maxIterations: config?.maxIterations || maxIterationsFromEnv || 300,
       temperature: config?.temperature || 0.7,
     };
   }
@@ -159,20 +165,39 @@ export class AIClient {
     onIteration?: (iteration: number, message: string) => void
   ): Promise<void> {
     let iteration = 0;
-    const maxIterations = this.config.maxIterations || 100;
+    const maxIterations = this.config.maxIterations || 300;
 
     while (!this.simulator.shouldTerminate() && iteration < maxIterations) {
       iteration++;
 
       try {
-        // 调用 AI 模型
-        const response = await this.client.chat.completions.create({
+        // 构建请求
+        const requestBody = {
           model: this.config.modelName,
           messages: this.conversationHistory as any,
           tools: this.toolDefinitions,
           tool_choice: 'auto',
           temperature: this.config.temperature,
-        });
+        };
+
+        // Debug: 输出请求详情
+        if (process.env.DEBUG === 'true') {
+          console.log('\n=== AI Request ===');
+          console.log('Model:', requestBody.model);
+          console.log('Messages:', JSON.stringify(requestBody.messages, null, 2));
+          console.log('Tools:', JSON.stringify(requestBody.tools, null, 2));
+          console.log('==================\n');
+        }
+
+        // 调用 AI 模型
+        const response = await this.client.chat.completions.create(requestBody);
+
+        // Debug: 输出响应详情
+        if (process.env.DEBUG === 'true') {
+          console.log('\n=== AI Response ===');
+          console.log('Response:', JSON.stringify(response, null, 2));
+          console.log('===================\n');
+        }
 
         const choice = response.choices[0];
         if (!choice) {
@@ -221,7 +246,7 @@ export class AIClient {
           // 如果模型没有工具调用且没有内容，可能需要提示
           if (!message.content || message.content.trim() === '') {
             this.addUserMessage(
-              'Please continue by calling appropriate tools to complete the delivery tasks.'
+              'Please continue by calling appropriate tools to complete the delivery tasks. If you are unsure what to do, you can call the "help" tool to see all available tools and game rules.'
             );
           }
         }
@@ -340,79 +365,5 @@ export function createAIClient(
   return new AIClient(simulator, config);
 }
 
-/**
- * 生成系统提示词
- * 
- * @param simulator 模拟器实例
- * @returns 系统提示词
- */
-export function generateSystemPrompt(simulator: Simulator): string {
-  const isLevel01 = simulator.isLevel01Mode();
-  const agentState = simulator.getAgentState();
-
-  const prompt = `
-# Silicon Rider Bench - AI 外卖骑手模拟
-
-你是一个 AI 外卖骑手，在虚拟城市中配送订单以赚取利润。
-
-## 目标
-${isLevel01 
-  ? '完成单个配送订单，验证基本功能。' 
-  : `在 24 小时内最大化利润。当前时间：${simulator.getFormattedTime()}`
-}
-
-## 当前状态
-- 位置：${agentState.getPosition()}
-- 电量：${agentState.getBattery()}%（续航 ${agentState.getBatteryRange().toFixed(1)} km）
-- 携带订单：${agentState.getCarriedOrders().length}/5
-- 总重量：${agentState.getTotalWeight().toFixed(1)}/10 kg
-- 当前利润：¥${agentState.getProfit().toFixed(2)}
-
-## 可用工具
-你可以调用以下工具来完成配送任务：
-
-### 信息查询类
-- **get_my_status()**: 查询当前状态（位置、电量、订单、利润等）
-- **search_nearby_orders(radius)**: 搜索指定半径内的可用订单
-- **get_location_info(locationId)**: 获取位置详细信息
-- **calculate_distance(fromId, toId)**: 计算两点间最短距离
-- **estimate_time(locationIds)**: 估算路径通行时间（考虑拥堵）
-
-### 行动类
-- **accept_order(orderId)**: 接受订单（最多 5 单，总重量不超过 10kg）
-- **move_to(targetLocationId)**: 移动到目标位置
-- **pickup_food(orderId)**: 在取餐点取餐（耗时 2 分钟）
-- **deliver_food(orderId)**: 在送餐点送餐（耗时 1 分钟）
-- **swap_battery()**: 在换电站换电（耗时 1 分钟，花费 0.5 元）
-
-## 重要规则
-1. **电量管理**：满电续航 50km，每公里消耗 2% 电量。电量耗尽后只能推行（10km/h）
-2. **承载限制**：最多携带 5 单，总重量不超过 10kg
-3. **订单类型**：
-   - 餐饮订单：0.5-1kg，配送费较低
-   - 超市订单：5-10kg，配送费较高
-   - 药店订单：0.05-0.2kg，配送费最高
-4. **超时惩罚**：
-   - 0-5 分钟：无惩罚
-   - 5-10 分钟：扣除 30% 配送费
-   - 10-15 分钟：扣除 50% 配送费
-   - 15 分钟以上：扣除 70% 配送费
-5. **拥堵影响**：道路拥堵会降低速度（30/25/20/15 km/h）
-6. **订单潮汐**：不同时段不同类型订单频率不同
-
-## 策略建议
-- 优先接受高配送费、低重量、近距离的订单
-- 合理规划路线，减少空驶
-- 注意电量，及时换电
-- 考虑订单时限，避免超时
-- 在订单密集时段多接单
-
-## 开始任务
-${isLevel01
-  ? '请依次调用工具完成配送：search_nearby_orders → accept_order → move_to → pickup_food → move_to → deliver_food'
-  : '请开始配送任务，通过调用工具来最大化利润。'
-}
-`.trim();
-
-  return prompt;
-}
+// 导出 generateSystemPrompt 以保持向后兼容
+export { generateSystemPrompt } from './system-prompt';

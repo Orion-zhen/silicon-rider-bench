@@ -16,6 +16,7 @@ import { createAIClient, generateSystemPrompt } from './client/ai-client';
 import { TerminalDisplay } from './visualization/terminal-display';
 import { ScoreCalculator } from './scoring/score-calculator';
 import { ReportGenerator } from './scoring/report-generator';
+import { formatStatusDisplay, formatHeader, formatSeparator } from './utils/cli-formatter';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -124,7 +125,7 @@ Silicon Rider Bench - AI 外卖骑手基准测试
   npm run dev -- --level 0.1 --no-viz --output report.md
 
 环境变量:
-  OPENROUTER_API_KEY            OpenRouter API 密钥（必需）
+  API_KEY                       API 密钥（必需，支持 OpenRouter、OpenAI 等）
   MODEL_NAME                    AI 模型名称（可选）
   BASE_URL                      API 基础 URL（可选）
   `.trim());
@@ -143,9 +144,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║       Silicon Rider Bench - AI 外卖骑手基准测试           ║');
-  console.log('╚════════════════════════════════════════════════════════════╝\n');
+  console.log(formatHeader('Silicon Rider Bench - AI 外卖骑手基准测试'));
 
   // 显示 Level 配置信息
   console.log(printLevelConfig(args.level));
@@ -198,7 +197,7 @@ async function main(): Promise<void> {
     let lastDisplayUpdate = Date.now();
     const displayInterval = 1000; // 每秒更新一次显示
 
-    await aiClient.runConversationLoop((iteration) => {
+    await aiClient.runConversationLoop((iteration, message) => {
       // 更新可视化
       const now = Date.now();
       if (display && now - lastDisplayUpdate >= displayInterval) {
@@ -206,13 +205,9 @@ async function main(): Promise<void> {
         lastDisplayUpdate = now;
       }
 
-      // 打印简短日志（如果禁用了可视化）
-      if (!display && iteration % 10 === 0) {
-        console.log(
-          `[Iteration ${iteration}] ${simulator.getFormattedTime()} | ` +
-          `Profit: ¥${simulator.getAgentState().getProfit().toFixed(2)} | ` +
-          `Completed: ${simulator.getAgentState().getCompletedOrders()}`
-        );
+      // 打印格式化的状态信息（如果禁用了可视化）
+      if (!display) {
+        console.log(formatStatusDisplay(simulator, iteration, message));
       }
     });
 
@@ -233,19 +228,8 @@ async function main(): Promise<void> {
     console.log('正在计算评分...');
     const stats = simulator.getStats();
     
-    // 创建评分计算器并填充数据
-    const scoreCalculator = new ScoreCalculator();
-    
-    // 从模拟器统计信息中填充评分计算器
-    // 注意：这里简化处理，实际应该在模拟过程中记录详细信息
-    for (let i = 0; i < stats.totalToolCalls; i++) {
-      scoreCalculator.recordToolCall(i >= stats.invalidToolCalls);
-    }
-    scoreCalculator.recordDistance(stats.totalDistance);
-    for (let i = 0; i < stats.batterySwaps; i++) {
-      scoreCalculator.recordBatterySwap(0.5);
-    }
-    
+    // 获取评分计算器（从模拟器中）
+    const scoreCalculator = simulator.getScoreCalculator();
     const metrics = scoreCalculator.calculateMetrics();
 
     // 生成报告
@@ -263,9 +247,9 @@ async function main(): Promise<void> {
     );
 
     // 输出报告
-    console.log('═'.repeat(60));
+    console.log('\n' + formatSeparator('═'));
     console.log(report);
-    console.log('═'.repeat(60));
+    console.log(formatSeparator('═'));
 
     // 保存报告到文件
     const outputFile = args.outputFile || `report-${args.level}-${Date.now()}.md`;

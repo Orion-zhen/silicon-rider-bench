@@ -29,7 +29,7 @@ describe('AIClient', () => {
         expect(config.baseURL).toBeDefined();
       } catch (error) {
         // 如果没有配置 API key，跳过测试
-        expect((error as Error).message).toContain('OPENROUTER_API_KEY');
+        expect((error as Error).message).toContain('API_KEY');
       }
     });
 
@@ -54,16 +54,16 @@ describe('AIClient', () => {
 
     it('should throw error if API key is missing', () => {
       // 临时清除环境变量
-      const originalKey = process.env.OPENROUTER_API_KEY;
-      delete process.env.OPENROUTER_API_KEY;
+      const originalKey = process.env.API_KEY;
+      delete process.env.API_KEY;
 
       expect(() => {
         createAIClient(simulator);
-      }).toThrow('OPENROUTER_API_KEY is required');
+      }).toThrow('API_KEY is required');
 
       // 恢复环境变量
       if (originalKey) {
-        process.env.OPENROUTER_API_KEY = originalKey;
+        process.env.API_KEY = originalKey;
       }
     });
   });

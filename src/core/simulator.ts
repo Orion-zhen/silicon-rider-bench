@@ -15,6 +15,7 @@ import { CongestionManager } from '../world/congestion-manager';
 import { Pathfinder } from '../world/pathfinder';
 import { ToolExecutor } from '../tools/tool-executor';
 import { createToolRegistry } from '../tools/index';
+import { ScoreCalculator } from '../scoring/score-calculator';
 
 /**
  * 模拟器状态
@@ -55,6 +56,7 @@ export class Simulator {
   private congestionManager: CongestionManager;
   private pathfinder: Pathfinder;
   private toolExecutor: ToolExecutor;
+  private scoreCalculator: ScoreCalculator;
   
   // 世界状态
   private nodes: Map<string, Node>;
@@ -118,6 +120,9 @@ export class Simulator {
     const toolRegistry = createToolRegistry();
     this.toolExecutor = new ToolExecutor(toolRegistry);
     
+    // 初始化评分计算器
+    this.scoreCalculator = new ScoreCalculator();
+    
     // 生成初始订单
     this.generateInitialOrders();
   }
@@ -179,13 +184,34 @@ export class Simulator {
       congestionManager: this.congestionManager,
       nodes: this.nodes,
       currentTime: this.gameClock.getCurrentTime(),
+      simulator: this, // 添加 simulator 引用，用于 help 工具
       onBatterySwap: () => {
         this.stats.batterySwaps++;
       },
-      onOrderComplete: (onTime: boolean) => {
+      onOrderComplete: (onTime: boolean, order?: Order, payment?: number, penalty?: number, overtime?: number) => {
         this.stats.completedOrders++;
         if (onTime) {
           this.stats.onTimeOrders++;
+        }
+        
+        // 记录到评分计算器
+        if (order && payment !== undefined && penalty !== undefined && overtime !== undefined) {
+          const optimalDistance = this.pathfinder.calculateDistance(
+            order.pickupLocation,
+            order.deliveryLocation
+          ).distance;
+          
+          this.scoreCalculator.recordOrderCompletion({
+            orderId: order.id,
+            orderType: order.type,
+            deliveryFee: order.deliveryFee,
+            payment,
+            penalty,
+            overtime,
+            onTime,
+            distance: order.distance,
+            optimalDistance,
+          });
         }
         
         // Level 0.1: 标记订单完成
@@ -198,12 +224,36 @@ export class Simulator {
     // 执行工具调用
     const response = await this.toolExecutor.execute(request, context);
     
+    // 记录到评分计算器
+    this.scoreCalculator.recordToolCall(response.success);
+    
     // 统计无效调用
     if (!response.success) {
       this.stats.invalidToolCalls++;
     }
     
-    // 更新拥堵地图
+    // 如果操作成功，推进时间（如果有 timeCost）
+    if (response.success && response.data) {
+      const data = response.data as any;
+      if (data.timeCost && typeof data.timeCost === 'number' && data.timeCost > 0) {
+        this.gameClock.advance(data.timeCost);
+      }
+    }
+    
+    // 如果是移动操作，记录距离
+    if (request.toolName === 'move_to' && response.success && response.data) {
+      const moveData = response.data as any;
+      if (moveData.distance) {
+        this.scoreCalculator.recordDistance(moveData.distance);
+      }
+    }
+    
+    // 如果是换电操作，记录换电
+    if (request.toolName === 'swap_battery' && response.success) {
+      this.scoreCalculator.recordBatterySwap(0.5);
+    }
+    
+    // 更新拥堵地图（使用推进后的时间）
     this.congestionMap = this.congestionManager.updateCongestion(this.gameClock.getCurrentTime());
     
     // 更新统计信息
@@ -351,6 +401,13 @@ export class Simulator {
    */
   getStats(): SimulatorStats {
     return { ...this.stats };
+  }
+
+  /**
+   * 获取评分计算器
+   */
+  getScoreCalculator(): ScoreCalculator {
+    return this.scoreCalculator;
   }
 
   /**

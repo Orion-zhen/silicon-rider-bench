@@ -14,10 +14,11 @@ cp .env.example .env
 
 ### 必需配置
 
-#### OPENROUTER_API_KEY
+#### API_KEY
 
-从 [OpenRouter](https://openrouter.ai/) 获取 API Key：
+支持多种 API 服务，根据你使用的服务获取对应的 API Key：
 
+**OpenRouter（推荐）：**
 1. 访问 https://openrouter.ai/
 2. 注册或登录账号
 3. 进入 Keys 页面
@@ -25,8 +26,22 @@ cp .env.example .env
 5. 复制 Key 并填入 `.env` 文件
 
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+**OpenAI：**
+1. 访问 https://platform.openai.com/
+2. 注册或登录账号
+3. 进入 API Keys 页面
+4. 创建新的 API Key
+5. 复制 Key 并填入 `.env` 文件
+
+```bash
+API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**其他兼容服务：**
+参考对应服务的文档获取 API Key，只要支持 OpenAI SDK 格式即可使用。
 
 ### 可选配置
 
@@ -83,6 +98,28 @@ BASE_URL=https://api.openai.com/v1
 # 使用自定义代理
 BASE_URL=https://your-proxy.com/v1
 ```
+
+#### MAX_ITERATIONS
+
+最大迭代次数，控制 AI 模型的最大对话轮数：
+
+```bash
+# 默认值：300
+MAX_ITERATIONS=300
+```
+
+**说明：**
+- 每次迭代代表一轮 AI 模型的请求和响应
+- Level 0.1 通常需要 5-10 次迭代即可完成
+- Level 1 可能需要 100-300 次迭代（取决于模型策略）
+- 如果达到最大迭代次数，模拟会自动终止并生成报告
+- 设置过低可能导致任务未完成就终止
+- 设置过高会增加 API 调用成本
+
+**推荐值：**
+- 快速测试：50-100
+- 正常运行：200-300
+- 长时间运行：500+
 
 #### SITE_URL 和 APP_NAME
 
@@ -250,7 +287,7 @@ done
 
 ```bash
 # .env
-OPENROUTER_API_KEY=your_dev_key
+API_KEY=your_dev_key
 MODEL_NAME=anthropic/claude-3-haiku  # 快速，成本低
 DEBUG=true
 ```
@@ -267,7 +304,7 @@ npm run dev -- --level 1 --no-viz
 
 ```bash
 # .env
-OPENROUTER_API_KEY=your_prod_key
+API_KEY=your_prod_key
 MODEL_NAME=anthropic/claude-3.5-sonnet  # 性能优秀
 SITE_URL=https://your-site.com
 APP_NAME=Silicon Rider Bench Production
@@ -297,9 +334,10 @@ npm run dev -- --level 1 --seed $SEED --model anthropic/claude-3-opus --output b
 **错误：** `Invalid API key`
 
 **解决：**
-1. 检查 `.env` 文件中的 `OPENROUTER_API_KEY` 是否正确
-2. 确认 API Key 在 OpenRouter 网站上是否有效
+1. 检查 `.env` 文件中的 `API_KEY` 是否正确
+2. 确认 API Key 在对应服务网站上是否有效
 3. 检查 API Key 是否有足够的额度
+4. 确认 `BASE_URL` 与 API Key 的服务匹配
 
 ### 模型不可用
 
@@ -355,7 +393,7 @@ const myConfig = createCustomLevelConfig({
 
 ### 调试模式
 
-启用详细日志：
+启用详细日志以查看完整的 AI 请求和响应：
 
 ```bash
 # .env
@@ -368,13 +406,20 @@ DEBUG=true
 DEBUG=true npm run level1
 ```
 
+**调试输出包括：**
+- 完整的请求 JSON（包括 messages 和 tools）
+- 完整的响应 JSON（包括 choices 和 usage）
+- 工具调用的详细信息
+
+**注意：** 调试模式会产生大量输出，建议只在需要排查问题时启用。
+
 ## 配置模板
 
 ### 快速测试模板
 
 ```bash
 # .env.quick-test
-OPENROUTER_API_KEY=your_key
+API_KEY=your_key
 MODEL_NAME=anthropic/claude-3-haiku
 DEBUG=true
 ```
@@ -389,7 +434,7 @@ npm run level0.1
 
 ```bash
 # .env.benchmark
-OPENROUTER_API_KEY=your_key
+API_KEY=your_key
 MODEL_NAME=anthropic/claude-3.5-sonnet
 SITE_URL=https://your-site.com
 APP_NAME=Silicon Rider Benchmark
@@ -405,7 +450,7 @@ npm run dev -- --level 1 --seed 67890 --output benchmark.md
 
 ```bash
 # .env.cost-optimized
-OPENROUTER_API_KEY=your_key
+API_KEY=your_key
 MODEL_NAME=anthropic/claude-3-haiku
 ```
 

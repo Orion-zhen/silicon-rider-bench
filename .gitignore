@@ -25,6 +25,8 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+report*.md
+debug*.md
 
 # Test output
 test-results/

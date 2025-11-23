@@ -13,6 +13,7 @@ import {
   CalculateDistanceResponse,
   EstimateTimeResponse,
   Node,
+  Order,
 } from '../types';
 import { AgentState } from '../core/agent-state';
 import { OrderGenerator } from '../core/order-generator';
@@ -31,8 +32,9 @@ export interface ToolContext {
   congestionManager: CongestionManager;
   nodes: Map<string, Node>;
   currentTime: number;
+  simulator?: any; // Simulator 实例，用于 help 工具
   onBatterySwap?: () => void;
-  onOrderComplete?: (onTime: boolean) => void;
+  onOrderComplete?: (onTime: boolean, order?: Order, payment?: number, penalty?: number, overtime?: number) => void;
 }
 
 /**
@@ -303,6 +305,46 @@ export const estimateTimeTool: ToolDefinition = {
 };
 
 /**
+ * 获取帮助信息
+ * 返回系统提示词作为帮助文档
+ * 
+ * 这个工具复用系统提示词生成逻辑，确保帮助信息与初始提示词保持一致
+ */
+export const helpTool: ToolDefinition = {
+  name: 'help',
+  description: '显示帮助信息，包括所有可用工具、游戏规则和策略建议',
+  parameters: {},
+  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<{ help: string }>> => {
+    // 从 context 中获取 simulator
+    const simulator = context.simulator;
+    
+    if (!simulator) {
+      return {
+        success: false,
+        error: {
+          code: 'INVALID_PARAMETER',
+          message: 'Simulator not available in context',
+          details: {},
+        },
+      };
+    }
+    
+    // 动态导入以避免循环依赖
+    const { generateSystemPrompt } = await import('../client/system-prompt.js');
+    
+    // 生成帮助信息（复用系统提示词）
+    const helpText = generateSystemPrompt(simulator);
+    
+    return {
+      success: true,
+      data: {
+        help: helpText,
+      },
+    };
+  },
+};
+
+/**
  * 获取所有查询工具
  */
 export function getQueryTools(): ToolDefinition[] {
@@ -312,5 +354,6 @@ export function getQueryTools(): ToolDefinition[] {
     getLocationInfoTool,
     calculateDistanceTool,
     estimateTimeTool,
+    helpTool,
   ];
 }

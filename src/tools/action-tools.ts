@@ -181,6 +181,7 @@ export const moveToTool: ToolDefinition = {
       timeCost: movementResult.time,
       batteryCost: movementResult.batteryCost,
       newPosition: targetLocationId,
+      distance: pathResult.distance,
     };
 
     if (movementResult.pushedDistance > 0) {
@@ -329,7 +330,13 @@ export const deliverFoodTool: ToolDefinition = {
     // 调用订单完成回调
     const onTime = paymentResult.overtime === 0;
     if (context.onOrderComplete) {
-      context.onOrderComplete(onTime);
+      context.onOrderComplete(
+        onTime,
+        order,
+        paymentResult.payment,
+        paymentResult.penalty,
+        paymentResult.overtime
+      );
     }
 
     return {
