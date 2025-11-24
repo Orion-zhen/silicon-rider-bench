@@ -42,63 +42,69 @@ class StatsPanel {
     this.container.innerHTML = `
       <div class="stat-section">
         <h3>Game Status</h3>
-        <div class="stat-item">
-          <span class="stat-label">Connection:</span>
-          <div id="connection-status-inline" class="connection-status disconnected">
-            <span class="status-dot"></span>
-            <span class="status-text">Disconnected</span>
+        <div class="stat-content">
+          <div class="stat-item">
+            <span class="stat-label">Connection:</span>
+            <div id="connection-status-inline" class="connection-status disconnected">
+              <span class="status-dot"></span>
+              <span class="status-text">Disconnected</span>
+            </div>
           </div>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Model:</span>
-          <span class="stat-value" id="stat-model">--</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Time:</span>
-          <span class="stat-value" id="stat-time">--:--</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Turn:</span>
-          <span class="stat-value" id="stat-turn">0/0</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Tokens (Last):</span>
-          <span class="stat-value" id="stat-tokens-last">0</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Tokens (Total):</span>
-          <span class="stat-value" id="stat-tokens-total">0</span>
+          <div class="stat-item">
+            <span class="stat-label">Model:</span>
+            <span class="stat-value" id="stat-model">--</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Time:</span>
+            <span class="stat-value" id="stat-time">--:--</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Turn:</span>
+            <span class="stat-value" id="stat-turn">0/0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Tokens (Last):</span>
+            <span class="stat-value" id="stat-tokens-last">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Tokens (Total):</span>
+            <span class="stat-value" id="stat-tokens-total">0</span>
+          </div>
         </div>
       </div>
       
       <div class="stat-section">
         <h3>Agent Status</h3>
-        <div class="stat-item">
-          <span class="stat-label">Battery:</span>
-          <span class="stat-value" id="stat-battery">--%</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Profit:</span>
-          <span class="stat-value" id="stat-profit">¥0.00</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Carried Orders:</span>
-          <span class="stat-value" id="stat-carried">0</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Total Weight:</span>
-          <span class="stat-value" id="stat-weight">0.0 kg</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">Completed:</span>
-          <span class="stat-value" id="stat-completed">0</span>
+        <div class="stat-content">
+          <div class="stat-item">
+            <span class="stat-label">Battery:</span>
+            <span class="stat-value" id="stat-battery">--%</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Profit:</span>
+            <span class="stat-value" id="stat-profit">¥0.00</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Carried Orders:</span>
+            <span class="stat-value" id="stat-carried">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Total Weight:</span>
+            <span class="stat-value" id="stat-weight">0.0 kg</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Completed:</span>
+            <span class="stat-value" id="stat-completed">0</span>
+          </div>
         </div>
       </div>
       
       <div class="stat-section orders-section">
         <h3>Orders in Backpack</h3>
-        <div id="orders-list" class="orders-list">
-          <div class="no-orders">No orders</div>
+        <div class="stat-content">
+          <div id="orders-list" class="orders-list">
+            <div class="no-orders">No orders</div>
+          </div>
         </div>
       </div>
     `;
@@ -327,10 +333,26 @@ class StatsPanel {
       const remainingTime = order.deadline - this.currentTime;
       const deadlineStatus = this.getDeadlineStatus(remainingTime);
       const deadlineClass = `deadline-${deadlineStatus.class}`;
+      const borderColorClass = `border-${deadlineStatus.class}`;
       const deadlineLabel = deadlineStatus.overdue ? 'Deadline (OVERDUE):' : 'Deadline:';
       
+      // Parse items from JSON string
+      let itemsHTML = '';
+      try {
+        const items = JSON.parse(order.name || '[]');
+        if (Array.isArray(items) && items.length > 0) {
+          itemsHTML = items.map(item => `<span class="item-badge">${item}</span>`).join('');
+        } else {
+          itemsHTML = '<span class="item-badge">Unknown</span>';
+        }
+      } catch (e) {
+        // Fallback for old format (string with 、)
+        const items = (order.name || 'Unknown').split('、');
+        itemsHTML = items.map(item => `<span class="item-badge">${item}</span>`).join('');
+      }
+      
       return `
-        <div class="order-item">
+        <div class="order-item ${borderColorClass}">
           <div class="order-header">
             <span class="order-id">#${order.id}</span>
             <span class="order-status">${status}</span>
@@ -338,11 +360,11 @@ class StatsPanel {
           <div class="order-details">
             <div class="order-detail order-name">
               <span class="detail-label">Items:</span>
-              <span class="detail-value">${order.name || 'Unknown'}</span>
+              <div class="items-container">${itemsHTML}</div>
             </div>
             <div class="order-detail">
               <span class="detail-label">Type:</span>
-              <span class="detail-value">${order.type}</span>
+              <span class="order-type">${order.type}</span>
             </div>
             <div class="order-detail">
               <span class="detail-label">Weight:</span>

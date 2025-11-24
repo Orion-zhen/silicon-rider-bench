@@ -83,7 +83,7 @@ export class FoodSelector {
       }
     }
 
-    return items.join('、');
+    return JSON.stringify(items);
   }
 
   /**
@@ -100,7 +100,7 @@ export class FoodSelector {
           selected.push(item);
         }
       }
-      return selected.join('、');
+      return JSON.stringify(selected);
     } else {
       // pharmacy
       const items = ['感冒药', '消炎药', '维生素', '创可贴', '口罩', '体温计', '保健品', '医用酒精'];
@@ -112,7 +112,7 @@ export class FoodSelector {
           selected.push(item);
         }
       }
-      return selected.join('、');
+      return JSON.stringify(selected);
     }
   }
 
