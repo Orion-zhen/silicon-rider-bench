@@ -54,7 +54,8 @@ class MapRenderer {
         name: node.name,
         x: node.position.x,
         y: node.position.y,
-        emoji: this.NODE_EMOJI_MAP[node.type] || '❓'
+        // Use emoji from backend if available, otherwise fallback to default
+        emoji: node.emoji || this.NODE_EMOJI_MAP[node.type] || '❓'
       });
       
       minX = Math.min(minX, node.position.x);
@@ -351,10 +352,10 @@ class MapRenderer {
           this.agentElement.style.position = 'absolute';
           this.agentElement.style.left = `${screen.x}px`;
           this.agentElement.style.top = `${screen.y}px`;
-          this.agentElement.style.transform = 'translate(-50%, -50%)';
+          this.agentElement.style.transform = 'translate(-50%, -50%) scale(1.5)';
           this.agentElement.style.fontSize = '32px';
           this.agentElement.style.zIndex = '100';
-          this.agentElement.textContent = '🚴';
+          this.agentElement.textContent = '🛵';
           this.container.appendChild(this.agentElement);
           console.log('[MapRenderer] Created agent element at', this.agentPosition);
         } else if (!this.isAnimating) {

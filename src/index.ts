@@ -112,8 +112,16 @@ async function main(): Promise<void> {
         console.log('✓ Web 服务器已启动');
         console.log(`  访问 URL: ${url}\n`);
 
-        // 创建 Web 可视化适配器
-        webVisualization = new WebVisualization(simulator, webServer);
+        // 初始化 AI 客户端（需要先初始化以获取模型名称）
+        console.log('正在初始化 AI 客户端...');
+        const clientConfig = args.modelName ? { modelName: args.modelName } : undefined;
+        const aiClient = createAIClient(simulator, clientConfig);
+        const modelName = aiClient.getConfig().modelName;
+        console.log('✓ AI 客户端初始化完成');
+        console.log(`  模型: ${modelName}\n`);
+
+        // 创建 Web 可视化适配器（传递模型名称）
+        webVisualization = new WebVisualization(simulator, webServer, modelName);
         
         // 当新客户端连接时，发送初始化数据
         webServer.onConnection(() => {
@@ -164,16 +172,29 @@ async function main(): Promise<void> {
       console.log('✓ 终端可视化模块已启用\n');
     }
 
-    // 初始化 AI 客户端
-    console.log('正在初始化 AI 客户端...');
-    const clientConfig = args.modelName ? { modelName: args.modelName } : undefined;
-    const aiClient = createAIClient(simulator, clientConfig, webVisualization || undefined);
-    console.log('✓ AI 客户端初始化完成');
-    console.log(`  模型: ${aiClient.getConfig().modelName}\n`);
+    // 如果不是 Web 模式，初始化 AI 客户端
+    let aiClient;
+    if (args.mode !== 'web') {
+      console.log('正在初始化 AI 客户端...');
+      const clientConfig = args.modelName ? { modelName: args.modelName } : undefined;
+      aiClient = createAIClient(simulator, clientConfig, webVisualization || undefined);
+      console.log('✓ AI 客户端初始化完成');
+      console.log(`  模型: ${aiClient.getConfig().modelName}\n`);
+    } else {
+      // Web 模式下，AI 客户端已经在上面初始化了
+      // 现在需要传递 webVisualization
+      const clientConfig = args.modelName ? { modelName: args.modelName } : undefined;
+      aiClient = createAIClient(simulator, clientConfig, webVisualization || undefined);
+    }
 
     // 生成系统提示词并初始化对话
     const systemPrompt = generateSystemPrompt(simulator);
     aiClient.initializeConversation(systemPrompt);
+
+    // 设置 Web 可视化的最大迭代次数
+    if (webVisualization) {
+      webVisualization.setMaxIterations(aiClient.getConfig().maxIterations || 300);
+    }
 
     // 记录开始时间
     const startTime = new Date();
@@ -188,6 +209,11 @@ async function main(): Promise<void> {
     const displayInterval = 1000; // 每秒更新一次显示
 
     await aiClient.runConversationLoop((iteration, message) => {
+      // 更新 Web 可视化的当前迭代次数
+      if (webVisualization) {
+        webVisualization.updateIteration(iteration);
+      }
+
       // 更新可视化
       const now = Date.now();
       
@@ -237,7 +263,7 @@ async function main(): Promise<void> {
 
     // 计算评分
     console.log('正在计算评分...');
-    const stats = simulator.getStats();
+    // const stats = simulator.getStats();
     
     // 获取评分计算器（从模拟器中）
     const scoreCalculator = simulator.getScoreCalculator();

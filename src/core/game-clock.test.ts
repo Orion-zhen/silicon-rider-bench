@@ -9,11 +9,11 @@ import { GameClock } from './game-clock';
 
 describe('GameClock', () => {
   describe('基本功能', () => {
-    it('应该使用默认值初始化（0:00 到 24:00）', () => {
+    it('应该使用默认值初始化（6:00 到次日 6:00）', () => {
       const clock = new GameClock();
-      expect(clock.getCurrentTime()).toBe(0);
-      expect(clock.getStartTime()).toBe(0);
-      expect(clock.getEndTime()).toBe(1440);
+      expect(clock.getCurrentTime()).toBe(360); // 6:00 = 360 分钟
+      expect(clock.getStartTime()).toBe(360);
+      expect(clock.getEndTime()).toBe(1800); // 次日 6:00 = 1800 分钟
     });
 
     it('应该使用自定义开始和结束时间初始化', () => {
@@ -25,21 +25,21 @@ describe('GameClock', () => {
 
     it('应该拒绝无效的开始时间', () => {
       expect(() => new GameClock(-1, 1440)).toThrow();
-      expect(() => new GameClock(1440, 1440)).toThrow();
+      expect(() => new GameClock(2880, 2880)).toThrow(); // 超过最大值
     });
 
     it('应该拒绝无效的结束时间', () => {
       expect(() => new GameClock(0, 0)).toThrow();
       expect(() => new GameClock(100, 50)).toThrow();
-      expect(() => new GameClock(0, 1441)).toThrow();
+      expect(() => new GameClock(0, 2881)).toThrow(); // 超过 2880 分钟（48小时）
     });
 
     it('应该推进时间', () => {
       const clock = new GameClock();
       clock.advance(30);
-      expect(clock.getCurrentTime()).toBe(30);
+      expect(clock.getCurrentTime()).toBe(390); // 360 + 30
       clock.advance(15);
-      expect(clock.getCurrentTime()).toBe(45);
+      expect(clock.getCurrentTime()).toBe(405); // 390 + 15
     });
 
     it('应该拒绝负数时间推进', () => {
@@ -88,6 +88,8 @@ describe('GameClock', () => {
       expect(GameClock.formatTime(60)).toBe('01:00');
       expect(GameClock.formatTime(125)).toBe('02:05');
       expect(GameClock.formatTime(1439)).toBe('23:59');
+      expect(GameClock.formatTime(1440)).toBe('00:00'); // 第二天 0:00
+      expect(GameClock.formatTime(1800)).toBe('06:00'); // 第二天 6:00
     });
 
     it('应该重置时钟', () => {
@@ -112,11 +114,11 @@ describe('GameClock', () => {
     it('属性 4: 时间推进一致性 - 时钟应该单调递增', () => {
       fc.assert(
         fc.property(
-          fc.integer({ min: 0, max: 1439 }), // startTime
+          fc.integer({ min: 0, max: 2879 }), // startTime (支持到 48 小时)
           fc.integer({ min: 1, max: 1440 }), // duration
           fc.array(fc.integer({ min: 0, max: 100 }), { minLength: 1, maxLength: 50 }), // operations
           (startTime, duration, operations) => {
-            const endTime = Math.min(1440, startTime + duration);
+            const endTime = Math.min(2880, startTime + duration);
             if (endTime <= startTime) return true; // Skip invalid cases
 
             const clock = new GameClock(startTime, endTime);
@@ -146,11 +148,11 @@ describe('GameClock', () => {
     it('属性 4: 时间推进一致性 - 多次推进应该累加', () => {
       fc.assert(
         fc.property(
-          fc.integer({ min: 0, max: 1000 }), // startTime
+          fc.integer({ min: 0, max: 2000 }), // startTime
           fc.array(fc.integer({ min: 1, max: 50 }), { minLength: 2, maxLength: 20 }), // time increments
           (startTime, increments) => {
             const totalIncrement = increments.reduce((sum, inc) => sum + inc, 0);
-            const endTime = Math.min(1440, startTime + totalIncrement + 100);
+            const endTime = Math.min(2880, startTime + totalIncrement + 100);
             
             // Skip if endTime would be invalid
             if (endTime <= startTime) return true;
@@ -178,10 +180,13 @@ describe('GameClock', () => {
     it('属性 4: 时间推进一致性 - 推进零分钟不改变时间', () => {
       fc.assert(
         fc.property(
-          fc.integer({ min: 0, max: 1439 }), // startTime
+          fc.integer({ min: 0, max: 2879 }), // startTime
           fc.integer({ min: 1, max: 1000 }), // some initial advance
           (startTime, initialAdvance) => {
-            const clock = new GameClock(startTime, 1440);
+            const endTime = Math.min(2880, startTime + initialAdvance + 100);
+            if (endTime <= startTime) return true;
+            
+            const clock = new GameClock(startTime, endTime);
             clock.advance(initialAdvance);
             
             const timeBefore = clock.getCurrentTime();
@@ -201,10 +206,10 @@ describe('GameClock', () => {
     it('属性测试: 结束时间检测一致性', () => {
       fc.assert(
         fc.property(
-          fc.integer({ min: 0, max: 900 }), // startTime (leave room for duration)
+          fc.integer({ min: 0, max: 2000 }), // startTime (leave room for duration)
           fc.integer({ min: 100, max: 500 }), // duration
           (startTime, duration) => {
-            const endTime = Math.min(1440, startTime + duration);
+            const endTime = Math.min(2880, startTime + duration);
             
             // Skip if endTime would be invalid
             if (endTime <= startTime) return true;
@@ -241,11 +246,11 @@ describe('GameClock', () => {
     it('属性测试: 剩余时间和已过时间互补', () => {
       fc.assert(
         fc.property(
-          fc.integer({ min: 0, max: 900 }), // startTime (leave room for duration)
+          fc.integer({ min: 0, max: 2000 }), // startTime (leave room for duration)
           fc.integer({ min: 100, max: 500 }), // duration
           fc.integer({ min: 0, max: 100 }), // advance amount
           (startTime, duration, advanceAmount) => {
-            const endTime = Math.min(1440, startTime + duration);
+            const endTime = Math.min(2880, startTime + duration);
             
             // Skip if endTime would be invalid
             if (endTime <= startTime) return true;

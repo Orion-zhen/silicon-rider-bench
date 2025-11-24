@@ -28,6 +28,15 @@ import type {
 export class WebVisualization {
   private simulator: Simulator;
   private webServer: WebServer;
+  private modelName: string;
+  private currentIteration: number = 0;
+  private maxIterations: number = 300;
+  private lastTotalTokens: number = 0;
+  private lastPromptTokens: number = 0;
+  private lastCompletionTokens: number = 0;
+  private cumulativeTotalTokens: number = 0;
+  private cumulativePromptTokens: number = 0;
+  private cumulativeCompletionTokens: number = 0;
   
   // 消息节流配置
   private readonly THROTTLE_INTERVAL = 100; // 100ms 节流间隔
@@ -35,11 +44,53 @@ export class WebVisualization {
   private pendingStateUpdate = false;
   private throttleTimer: NodeJS.Timeout | null = null;
 
-  constructor(simulator: Simulator, webServer: WebServer) {
+  constructor(simulator: Simulator, webServer: WebServer, modelName?: string) {
     this.simulator = simulator;
     this.webServer = webServer;
+    this.modelName = modelName || 'Unknown';
   }
   
+  /**
+   * 设置最大迭代次数
+   * @param maxIterations 最大迭代次数
+   */
+  setMaxIterations(maxIterations: number): void {
+    this.maxIterations = maxIterations;
+  }
+
+  /**
+   * 更新当前迭代次数
+   * @param iteration 当前迭代次数
+   */
+  updateIteration(iteration: number): void {
+    this.currentIteration = iteration;
+  }
+
+  /**
+   * 更新 token 使用量
+   * @param lastTotal 单次总 token 数
+   * @param lastPrompt 单次提示 token 数
+   * @param lastCompletion 单次完成 token 数
+   * @param cumulativeTotal 累计总 token 数
+   * @param cumulativePrompt 累计提示 token 数
+   * @param cumulativeCompletion 累计完成 token 数
+   */
+  updateTokenUsage(
+    lastTotal: number,
+    lastPrompt: number,
+    lastCompletion: number,
+    cumulativeTotal: number,
+    cumulativePrompt: number,
+    cumulativeCompletion: number
+  ): void {
+    this.lastTotalTokens = lastTotal;
+    this.lastPromptTokens = lastPrompt;
+    this.lastCompletionTokens = lastCompletion;
+    this.cumulativeTotalTokens = cumulativeTotal;
+    this.cumulativePromptTokens = cumulativePrompt;
+    this.cumulativeCompletionTokens = cumulativeCompletion;
+  }
+
   /**
    * 清理资源
    * 在服务器关闭时调用
@@ -65,6 +116,7 @@ export class WebVisualization {
       type: node.type,
       name: node.name,
       position: node.position,
+      emoji: node.emoji,
     }));
 
     // 转换边数据
@@ -84,6 +136,7 @@ export class WebVisualization {
           level: this.simulator.isLevel01Mode() ? '0.1' : '1',
           seed: config.seed,
           duration: config.duration,
+          modelName: this.modelName,
         },
       },
     };
@@ -146,9 +199,11 @@ export class WebVisualization {
     const carriedOrders = agentState.getCarriedOrders().map(order => ({
       id: order.id,
       type: order.type,
+      name: order.name,
       weight: order.weight,
       deadline: order.deadline || 0,
       pickedUp: order.pickedUp,
+      deliveryFee: order.deliveryFee,
     }));
 
     const message: StateUpdateMessage = {
@@ -157,6 +212,14 @@ export class WebVisualization {
       data: {
         currentTime,
         formattedTime,
+        currentIteration: this.currentIteration,
+        maxIterations: this.maxIterations,
+        lastTotalTokens: this.lastTotalTokens,
+        lastPromptTokens: this.lastPromptTokens,
+        lastCompletionTokens: this.lastCompletionTokens,
+        cumulativeTotalTokens: this.cumulativeTotalTokens,
+        cumulativePromptTokens: this.cumulativePromptTokens,
+        cumulativeCompletionTokens: this.cumulativeCompletionTokens,
         agentState: {
           position: agentState.getPosition(),
           battery: agentState.getBattery(),

@@ -6,6 +6,7 @@
 import { Order, OrderType, Node } from '../types';
 import { SeededRNG } from '../utils/seeded-rng';
 import { calculateTotalFee } from './fee-calculator';
+import { getFoodSelector } from '../data/food-selector';
 
 /**
  * 订单潮汐配置
@@ -196,9 +197,14 @@ export class OrderGenerator {
     // 注意：配送费在接单时才计算时段费，这里先用 0 作为接单时间
     const deliveryFee = calculateTotalFee(distance, itemPrice, 0);
     
+    // 生成订单名称
+    const foodSelector = getFoodSelector();
+    const name = foodSelector.selectFoodName(orderType, weight, itemPrice);
+    
     const order: Order = {
       id: `order_${++this.orderCounter}`,
       type: orderType,
+      name,
       pickupLocation: pickupNode.id,
       deliveryLocation: deliveryNode.id,
       distance,
@@ -271,10 +277,10 @@ export class OrderGenerator {
   /**
    * 移除过期订单
    */
-  removeExpiredOrders(currentTime: number): void {
+  removeExpiredOrders(_currentTime: number): void {
     const expiredOrders: string[] = [];
     
-    for (const [orderId, order] of this.availableOrders.entries()) {
+    for (const [] of this.availableOrders.entries()) {
       // 如果订单已经存在超过其时限的时间，则移除
       // 这里假设订单生成后如果在时限内未被接受就过期
       // 实际实现可能需要记录订单生成时间

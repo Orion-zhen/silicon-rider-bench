@@ -17,7 +17,7 @@ import dotenv from 'dotenv';
 import { Simulator } from '../core/simulator';
 import { ToolCallRequest } from '../types';
 import { createToolRegistry } from '../tools';
-import { generateSystemPrompt } from './system-prompt';
+// import { generateSystemPrompt } from './system-prompt';
 import type { WebVisualization } from '../web/web-visualization.js';
 
 // 加载环境变量
@@ -70,6 +70,12 @@ export class AIClient {
   private conversationLogs: ConversationLogEntry[];
   private lastReadLogIndex: number;
   private webVisualization?: WebVisualization;
+  private totalTokens = 0;
+  private promptTokens = 0;
+  private completionTokens = 0;
+  private cumulativeTotalTokens = 0;
+  private cumulativePromptTokens = 0;
+  private cumulativeCompletionTokens = 0;
 
   /**
    * 创建 AI 客户端实例
@@ -212,6 +218,31 @@ export class AIClient {
 
         // 调用 AI 模型
         const response = await this.client.chat.completions.create(requestBody);
+
+        // 更新 token 使用量统计
+        if (response.usage) {
+          // 单次调用的 token 使用量
+          this.totalTokens = response.usage.total_tokens || 0;
+          this.promptTokens = response.usage.prompt_tokens || 0;
+          this.completionTokens = response.usage.completion_tokens || 0;
+          
+          // 累计 token 使用量
+          this.cumulativeTotalTokens += this.totalTokens;
+          this.cumulativePromptTokens += this.promptTokens;
+          this.cumulativeCompletionTokens += this.completionTokens;
+          
+          // 更新 Web 可视化的 token 信息
+          if (this.webVisualization) {
+            this.webVisualization.updateTokenUsage(
+              this.totalTokens,
+              this.promptTokens,
+              this.completionTokens,
+              this.cumulativeTotalTokens,
+              this.cumulativePromptTokens,
+              this.cumulativeCompletionTokens
+            );
+          }
+        }
 
         // Debug: 输出响应详情
         if (isDebugMode) {
@@ -435,6 +466,31 @@ export class AIClient {
   }
 
   /**
+   * 获取工具的用法说明
+   * 
+   * @param toolName 工具名称
+   * @returns 工具用法说明
+   */
+  private getToolUsage(toolName: string): string {
+    const usageMap: Record<string, string> = {
+      'get_my_status': 'Usage: get_my_status() - no parameters required',
+      'search_nearby_orders': 'Usage: search_nearby_orders({"radius": <number>}) - Parameters: radius (required, number, search radius in km)',
+      'search_nearby_battery_stations': 'Usage: search_nearby_battery_stations({"radius": <number>}) - Parameters: radius (required, number, search radius in km)',
+      'get_location_info': 'Usage: get_location_info({"locationId": "<string>"}) - Parameters: locationId (required, string, location ID)',
+      'calculate_distance': 'Usage: calculate_distance({"fromId": "<string>", "toId": "<string>"}) - Parameters: fromId (required, string, start location ID), toId (required, string, end location ID)',
+      'estimate_time': 'Usage: estimate_time({"locationIds": ["<string>", "<string>", ...]}) - Parameters: locationIds (required, string array, list of location IDs)',
+      'help': 'Usage: help() - no parameters required',
+      'accept_order': 'Usage: accept_order({"orderId": "<string>"}) - Parameters: orderId (required, string, order ID)',
+      'move_to': 'Usage: move_to({"targetLocationId": "<string>"}) - Parameters: targetLocationId (required, string, target location ID)',
+      'pickup_food': 'Usage: pickup_food({"orderId": "<string>"}) - Parameters: orderId (required, string, order ID)',
+      'deliver_food': 'Usage: deliver_food({"orderId": "<string>"}) - Parameters: orderId (required, string, order ID)',
+      'swap_battery': 'Usage: swap_battery() - no parameters required',
+    };
+
+    return usageMap[toolName] || `Usage: ${toolName}(<parameters>) - please check tool definition`;
+  }
+
+  /**
    * 处理工具调用
    * 需求：16.3, 16.4
    * 
@@ -452,7 +508,16 @@ export class AIClient {
 
       try {
         // 解析参数
-        const parameters = JSON.parse(toolCall.function.arguments);
+        // 处理 AI 可能传输的 "undefined" 字符串
+        let parameters: Record<string, any>;
+        const args = toolCall.function.arguments?.trim() || '';
+        
+        if (args === '' || args === 'undefined' || args === 'null') {
+          // 如果参数为空、"undefined" 或 "null"，使用空对象
+          parameters = {};
+        } else {
+          parameters = JSON.parse(args);
+        }
 
         // 构建工具调用请求
         const request: ToolCallRequest = {
@@ -471,6 +536,14 @@ export class AIClient {
         });
       } catch (error) {
         // 处理解析或执行错误
+        let errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
+        // 如果是 JSON 解析错误，添加工具用法说明
+        if (error instanceof SyntaxError || errorMessage.includes('JSON')) {
+          const usage = this.getToolUsage(toolName);
+          errorMessage = `${errorMessage}. ${usage}`;
+        }
+        
         results.push({
           toolCallId,
           toolName,
@@ -478,8 +551,11 @@ export class AIClient {
             success: false,
             error: {
               code: 'INVALID_PARAMETER',
-              message: error instanceof Error ? error.message : 'Unknown error',
-              details: { error: String(error) },
+              message: errorMessage,
+              details: { 
+                error: String(error),
+                rawArguments: toolCall.function.arguments,
+              },
             },
           },
         });
@@ -514,6 +590,29 @@ export class AIClient {
    */
   getSimulator(): Simulator {
     return this.simulator;
+  }
+
+  /**
+   * 获取 token 使用量统计
+   * 
+   * @returns token 使用量信息（包含单次和累计）
+   */
+  getTokenUsage(): { 
+    last: { total: number; prompt: number; completion: number };
+    cumulative: { total: number; prompt: number; completion: number };
+  } {
+    return {
+      last: {
+        total: this.totalTokens,
+        prompt: this.promptTokens,
+        completion: this.completionTokens,
+      },
+      cumulative: {
+        total: this.cumulativeTotalTokens,
+        prompt: this.cumulativePromptTokens,
+        completion: this.cumulativeCompletionTokens,
+      },
+    };
   }
 }
 

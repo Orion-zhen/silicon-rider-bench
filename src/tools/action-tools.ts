@@ -360,7 +360,7 @@ export const swapBatteryTool: ToolDefinition = {
   name: 'swap_battery',
   description: '在换电站更换电池，恢复电量到 100%',
   parameters: {},
-  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<SwapBatteryResponse>> => {
+  handler: async (_params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<SwapBatteryResponse>> => {
     const { agentState, nodes } = context;
 
     // 检查是否在换电站

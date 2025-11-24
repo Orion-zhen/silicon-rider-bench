@@ -50,6 +50,7 @@ export interface InitMessage extends WebSocketMessage {
       type: NodeType;
       name: string;
       position: { x: number; y: number };
+      emoji?: string;
     }>;
     edges: Array<{
       from: string;
@@ -60,6 +61,7 @@ export interface InitMessage extends WebSocketMessage {
       level: string;
       seed: number;
       duration: number;
+      modelName?: string;
     };
   };
 }
@@ -73,6 +75,14 @@ export interface StateUpdateMessage extends WebSocketMessage {
   data: {
     currentTime: number;
     formattedTime: string;
+    currentIteration?: number;
+    maxIterations?: number;
+    lastTotalTokens?: number;
+    lastPromptTokens?: number;
+    lastCompletionTokens?: number;
+    cumulativeTotalTokens?: number;
+    cumulativePromptTokens?: number;
+    cumulativeCompletionTokens?: number;
     agentState: {
       position: string;
       battery: number;
@@ -80,6 +90,7 @@ export interface StateUpdateMessage extends WebSocketMessage {
       carriedOrders: Array<{
         id: string;
         type: string;
+        name: string;
         weight: number;
         deadline: number;
         pickedUp: boolean;

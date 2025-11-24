@@ -3,7 +3,7 @@
  * 用于格式化命令行输出
  */
 
-import { AgentState } from '../core/agent-state';
+// import { AgentState } from '../core/agent-state';
 import { Simulator } from '../core/simulator';
 
 /**

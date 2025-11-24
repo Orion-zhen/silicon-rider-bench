@@ -21,24 +21,20 @@ function createTestEnvironment() {
   const window = dom.window;
   const document = window.document;
   
-  // Polyfill requestAnimationFrame for JSDOM - inject it into the code
-  const polyfillCode = `
-    if (typeof requestAnimationFrame === 'undefined') {
-      var requestAnimationFrame = function(callback) {
-        return setTimeout(function() { callback(Date.now()); }, 0);
-      };
-    }
-  `;
+  // Inject document and requestAnimationFrame into global scope
+  (global as any).document = document;
+  (global as any).requestAnimationFrame = (callback: FrameRequestCallback) => {
+    return setTimeout(() => callback(Date.now()), 0) as any;
+  };
   
-  // Execute the MapRenderer code with the polyfill
+  // Execute the MapRenderer code in the context with document available
   const scriptCode = `
-    ${polyfillCode}
     ${mapRendererCode}
     return MapRenderer;
   `;
   
-  const script = new window.Function(scriptCode);
-  const MapRenderer = script.call(window);
+  const script = new Function(scriptCode);
+  const MapRenderer = script();
   
   return { MapRenderer, document, window };
 }
@@ -51,14 +47,14 @@ describe('MapRenderer Property Tests', () => {
    * Validates: Requirements 2.3
    */
   describe('Property 4: Node emoji mapping', () => {
-    it('should map all node types to their corresponding emoji icons', () => {
-      fc.assert(
-        fc.property(
+    it('should map all node types to their corresponding emoji icons', async () => {
+      await fc.assert(
+        fc.asyncProperty(
           fc.constantFrom('restaurant', 'supermarket', 'pharmacy', 'residential', 'office', 'battery_swap'),
           fc.string({ minLength: 1, maxLength: 20 }),
           fc.float({ min: 0, max: 100 }),
           fc.float({ min: 0, max: 100 }),
-          (nodeType, nodeName, x, y) => {
+          async (nodeType, nodeName, x, y) => {
             const { MapRenderer, document } = createTestEnvironment();
             const container = document.getElementById('map-container');
             const renderer = new MapRenderer(container);
@@ -82,6 +78,13 @@ describe('MapRenderer Property Tests', () => {
             }];
             
             renderer.initialize(nodes, []);
+            
+            // Wait for render to complete (requestAnimationFrame is async)
+            await new Promise<void>((resolve) => {
+              setTimeout(() => {
+                resolve();
+              }, 10);
+            });
             
             // Check that the rendered HTML contains the expected emoji
             const containerHTML = container.innerHTML;
@@ -177,9 +180,9 @@ describe('MapRenderer Property Tests', () => {
    * Validates: Requirements 5.2
    */
   describe('Property 12: Client position update', () => {
-    it('should update agent position to match the received message', () => {
-      fc.assert(
-        fc.property(
+    it('should update agent position to match the received message', async () => {
+      await fc.assert(
+        fc.asyncProperty(
           fc.array(
             fc.record({
               id: fc.string({ minLength: 1, maxLength: 10 }),
@@ -191,7 +194,7 @@ describe('MapRenderer Property Tests', () => {
             { minLength: 2, maxLength: 10 }
           ),
           fc.nat(),
-          (nodeConfigs, agentPositionIndex) => {
+          async (nodeConfigs, agentPositionIndex) => {
             // Ensure unique node IDs
             const uniqueNodes = Array.from(
               new Map(nodeConfigs.map(n => [n.id, n])).values()
@@ -219,11 +222,18 @@ describe('MapRenderer Property Tests', () => {
             const targetNodeId = nodes[agentPositionIndex % nodes.length].id;
             renderer.updateAgentPosition(targetNodeId);
             
+            // Wait for render to complete (requestAnimationFrame is async)
+            await new Promise<void>((resolve) => {
+              setTimeout(() => {
+                resolve();
+              }, 10);
+            });
+            
             // Check that the agent marker is present and associated with the correct node
             const containerHTML = container.innerHTML;
             
-            // The agent emoji should be present
-            expect(containerHTML).toContain('🚴');
+            // The agent emoji should be present (using scooter emoji from map-renderer.js)
+            expect(containerHTML).toContain('🛵');
             
             // The agent position should be stored correctly
             expect(renderer.agentPosition).toBe(targetNodeId);

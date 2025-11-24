@@ -22,17 +22,17 @@ export class GameClock {
   /**
    * 创建游戏时钟
    * 
-   * @param startTime - 开始时间（分钟，默认 0）
-   * @param endTime - 结束时间（分钟，默认 1440，即 24 小时）
+   * @param startTime - 开始时间（分钟，默认 360，即 6:00）
+   * @param endTime - 结束时间（分钟，默认 1800，即第二天 6:00）
    * 
-   * 需求 3.1: WHEN 模拟器初始化 THEN 游戏时钟 SHALL 从配置的开始时间启动（默认 0:00）
+   * 需求 3.1: WHEN 模拟器初始化 THEN 游戏时钟 SHALL 从配置的开始时间启动（默认 6:00）
    */
-  constructor(startTime: number = 0, endTime: number = 1440) {
-    if (startTime < 0 || startTime >= 1440) {
-      throw new Error('Start time must be between 0 and 1439 minutes');
+  constructor(startTime: number = 360, endTime: number = 1800) {
+    if (startTime < 0 || startTime >= 2880) {
+      throw new Error('Start time must be between 0 and 2879 minutes');
     }
-    if (endTime <= startTime || endTime > 1440) {
-      throw new Error('End time must be greater than start time and at most 1440 minutes');
+    if (endTime <= startTime || endTime > 2880) {
+      throw new Error('End time must be greater than start time and at most 2880 minutes');
     }
 
     this.startTime = startTime;
@@ -118,7 +118,7 @@ export class GameClock {
    * @returns 格式化的时间字符串（HH:MM）
    */
   static formatTime(minutes: number): string {
-    const hours = Math.floor(minutes / 60);
+    const hours = Math.floor(minutes / 60) % 24; // 使用模运算确保小时在 0-23 范围内
     const mins = Math.floor(minutes % 60);
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   }

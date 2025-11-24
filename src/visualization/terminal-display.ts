@@ -6,7 +6,7 @@
  * 实现实时终端显示，包括地图渲染、状态信息和实时更新
  */
 
-import { Node, NodeType, Order } from '../types';
+import { NodeType } from '../types';
 import { Simulator } from '../core/simulator';
 import { GameClock } from '../core/game-clock';
 
@@ -115,7 +115,7 @@ export class TerminalDisplay {
    * 需求：15.1
    */
   private renderHeader(): string {
-    const config = this.simulator.getConfig();
+    // const config = this.simulator.getConfig();
     const level = this.simulator.isLevel01Mode() ? '0.1' : '1';
     const title = `Silicon Rider Bench - Level ${level}`;
     const padding = Math.max(0, this.config.mapWidth - title.length);

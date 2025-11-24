@@ -233,21 +233,14 @@ class UIManager {
   initialize() {
     console.log('[UI] Initializing UI elements...');
     
-    this.connectionIndicator = document.getElementById('connection-status');
     this.mapContainer = document.getElementById('map-container');
     this.statsContainer = document.getElementById('stats-panel');
     this.chatContainer = document.getElementById('chat-panel');
 
-    console.log('[UI] Connection indicator:', this.connectionIndicator);
     console.log('[UI] Map container:', this.mapContainer);
     console.log('[UI] Stats container:', this.statsContainer);
     console.log('[UI] Chat container:', this.chatContainer);
 
-    if (!this.connectionIndicator) {
-      console.error('[UI] ❌ Connection indicator element not found');
-    } else {
-      console.log('[UI] ✓ Connection indicator found');
-    }
     if (!this.mapContainer) {
       console.error('[UI] ❌ Map container element not found');
     } else {
@@ -266,24 +259,11 @@ class UIManager {
   }
 
   /**
-   * Update connection status indicator
+   * Update connection status indicator (now in stats panel)
    */
   updateConnectionStatus(connected, reconnecting = false) {
-    if (!this.connectionIndicator) return;
-
-    const statusDot = this.connectionIndicator.querySelector('.status-dot');
-    const statusText = this.connectionIndicator.querySelector('.status-text');
-
-    if (connected) {
-      if (statusText) statusText.textContent = 'Connected';
-      this.connectionIndicator.className = 'connection-status connected';
-    } else if (reconnecting) {
-      if (statusText) statusText.textContent = 'Reconnecting...';
-      this.connectionIndicator.className = 'connection-status reconnecting';
-    } else {
-      if (statusText) statusText.textContent = 'Disconnected';
-      this.connectionIndicator.className = 'connection-status disconnected';
-    }
+    // Connection status is now managed by StatsPanel
+    // We'll update it through the app's statsPanel reference
   }
 
   /**
@@ -319,7 +299,7 @@ class Application {
 
     // Setup connection state handler
     this.connectionManager.onConnectionStateChange((connected, reconnecting) => {
-      this.uiManager.updateConnectionStatus(connected, reconnecting);
+      this.updateConnectionStatusInStats(connected, reconnecting);
     });
 
     // Register message handlers
@@ -394,6 +374,14 @@ class Application {
       console.log('[App] Creating StatsPanel...');
       this.statsPanel = new StatsPanel(this.uiManager.statsContainer);
       console.log('[App] StatsPanel initialized');
+      
+      // Set model name if available in config
+      if (data.config && data.config.modelName) {
+        this.statsPanel.setModelName(data.config.modelName);
+      }
+      
+      // Update connection status now that stats panel is initialized
+      this.updateConnectionStatusInStats(this.connectionManager.isConnected(), false);
     } else {
       console.warn('[App] StatsPanel not available or container not found');
     }
@@ -426,7 +414,15 @@ class Application {
     // Update stats panel
     if (this.statsPanel) {
       console.log('[App] Updating stats panel');
-      this.statsPanel.update(data.agentState, data.formattedTime);
+      this.statsPanel.update(
+        data.agentState, 
+        data.formattedTime,
+        data.currentIteration,
+        data.maxIterations,
+        data.lastTotalTokens,
+        data.cumulativeTotalTokens,
+        data.currentTime
+      );
     } else {
       console.warn('[App] Stats panel not initialized');
     }
@@ -474,6 +470,43 @@ class Application {
   handleSimulationEnd(data) {
     if (this.chatPanel) {
       this.chatPanel.addMessage('system', `Simulation completed!\n\nFinal Report:\n${data.report}`);
+    }
+  }
+  
+  /**
+   * Update connection status in stats panel
+   */
+  updateConnectionStatusInStats(connected, reconnecting = false) {
+    console.log('[App] Updating connection status:', { connected, reconnecting });
+    
+    if (!this.statsPanel) {
+      console.warn('[App] Stats panel not initialized yet');
+      return;
+    }
+    
+    if (!this.statsPanel.elements || !this.statsPanel.elements.connectionStatus) {
+      console.warn('[App] Connection status element not found in stats panel');
+      return;
+    }
+    
+    const statusElement = this.statsPanel.elements.connectionStatus;
+    const statusText = statusElement.querySelector('.status-text');
+    
+    console.log('[App] Status element:', statusElement);
+    console.log('[App] Status text element:', statusText);
+    
+    if (connected) {
+      if (statusText) statusText.textContent = 'Connected';
+      statusElement.className = 'connection-status connected';
+      console.log('[App] Set status to connected');
+    } else if (reconnecting) {
+      if (statusText) statusText.textContent = 'Reconnecting...';
+      statusElement.className = 'connection-status reconnecting';
+      console.log('[App] Set status to reconnecting');
+    } else {
+      if (statusText) statusText.textContent = 'Disconnected';
+      statusElement.className = 'connection-status disconnected';
+      console.log('[App] Set status to disconnected');
     }
   }
 }

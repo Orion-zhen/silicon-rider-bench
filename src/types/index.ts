@@ -26,6 +26,7 @@ export interface Node {
   type: NodeType;
   position: { x: number; y: number };
   name: string;
+  emoji?: string; // 可选的 emoji 图标
 }
 
 /**
@@ -58,6 +59,7 @@ export type OrderType = 'food' | 'supermarket' | 'pharmacy';
 export interface Order {
   id: string;
   type: OrderType;
+  name: string;              // 订单名称（食物/商品名称）
   pickupLocation: string;    // Node ID
   deliveryLocation: string;  // Node ID
   distance: number;          // km
@@ -173,6 +175,7 @@ export interface GetMyStatusResponse {
   acceptedOrders: Array<{
     id: string;
     type: string;
+    name: string;
     weight: number;
     deadline: number;
     pickupLocation: string;
@@ -181,6 +184,7 @@ export interface GetMyStatusResponse {
   carriedOrders: Array<{
     id: string;
     type: string;
+    name: string;
     weight: number;
     deadline: number;
     pickupLocation: string;
@@ -199,6 +203,7 @@ export interface SearchNearbyOrdersResponse {
   orders: Array<{
     id: string;
     type: OrderType;
+    name: string;
     deliveryFee: number;
     weight: number;
     itemPrice: number;

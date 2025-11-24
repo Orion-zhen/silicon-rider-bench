@@ -102,7 +102,10 @@ export class Simulator {
     this.edges = map.edges;
     
     // 初始化子系统
-    this.gameClock = new GameClock(0, config.duration);
+    // 从凌晨 6:00 开始，持续到第二天凌晨 6:00
+    const startTime = 6 * 60; // 6:00 = 360 分钟
+    const endTime = startTime + config.duration; // 结束时间 = 开始时间 + 持续时间
+    this.gameClock = new GameClock(startTime, endTime);
     
     // 选择初始位置（随机选择一个节点）
     const nodeIds = Array.from(this.nodes.keys());
@@ -113,8 +116,8 @@ export class Simulator {
     this.congestionManager = new CongestionManager(this.edges, this.nodes);
     this.pathfinder = new Pathfinder(this.nodes, this.edges);
     
-    // 初始化拥堵地图
-    this.congestionMap = this.congestionManager.updateCongestion(0);
+    // 初始化拥堵地图（使用开始时间）
+    this.congestionMap = this.congestionManager.updateCongestion(startTime);
     
     // 初始化工具系统
     const toolRegistry = createToolRegistry();
@@ -131,6 +134,8 @@ export class Simulator {
    * 生成初始订单
    */
   private generateInitialOrders(): void {
+    const currentTime = this.gameClock.getCurrentTime();
+    
     if (this.isLevel01) {
       // Level 0.1: 只生成一个订单
       const pickupNodes = Array.from(this.nodes.values()).filter(
@@ -141,7 +146,7 @@ export class Simulator {
       );
       
       this.orderGenerator.generateOrder(
-        0,
+        currentTime,
         pickupNodes,
         deliveryNodes,
         (from, to) => this.calculateDistance(from, to)
@@ -159,7 +164,7 @@ export class Simulator {
       const initialOrderCount = 5 + Math.floor(Math.random() * 6);
       this.orderGenerator.generateOrders(
         initialOrderCount,
-        0,
+        currentTime,
         pickupNodes,
         deliveryNodes,
         (from, to) => this.calculateDistance(from, to)
@@ -199,7 +204,7 @@ export class Simulator {
           const optimalDistance = this.pathfinder.calculateDistance(
             order.pickupLocation,
             order.deliveryLocation
-          ).distance;
+          )?.distance ?? 0;
           
           this.scoreCalculator.recordOrderCompletion({
             orderId: order.id,
@@ -321,7 +326,7 @@ export class Simulator {
     }
     
     // Level 1: 根据基准频率生成新订单
-    const baseFrequency = this.config.baseOrderFrequency || 5;
+    // const baseFrequency = this.config.baseOrderFrequency || 5;
     const currentTime = this.gameClock.getCurrentTime();
     
     // 简单实现：每次调用生成 1-3 个订单

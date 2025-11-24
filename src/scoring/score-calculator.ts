@@ -5,7 +5,7 @@
  * 需求：14.1-14.4
  */
 
-import { Order } from '../types';
+// import { Order } from '../types';
 
 /**
  * 订单完成记录

@@ -11,12 +11,12 @@ import { CongestionManager } from './congestion-manager.js';
  */
 export class Pathfinder {
   private nodes: Map<string, Node>;
-  private edges: Edge[];
+  // private edges: Edge[];
   private adjacency: Map<string, Map<string, Edge>>;
 
   constructor(nodes: Map<string, Node>, edges: Edge[]) {
     this.nodes = nodes;
-    this.edges = edges;
+    // this.edges = edges;
     this.adjacency = this.buildAdjacencyList(edges);
   }
 

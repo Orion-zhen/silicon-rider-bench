@@ -33,7 +33,7 @@ describe('Simulator', () => {
     });
 
     it('应该初始化游戏时钟', () => {
-      expect(simulator.getCurrentTime()).toBe(0);
+      expect(simulator.getCurrentTime()).toBe(360); // 从凌晨 6:00 开始
     });
 
     it('应该生成地图', () => {

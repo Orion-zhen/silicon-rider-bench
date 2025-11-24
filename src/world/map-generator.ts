@@ -162,9 +162,10 @@ function generateNodes(
     
     const node: Node = {
       id: `node_${i}`,
-      type: shuffledTypes[i],
+      type,
       position: { x: position.x, y: position.y },
-      name: generateNodeName(shuffledTypes[i], i),
+      name: generateNodeName(type, i),
+      emoji: getRandomEmoji(rng, type),
     };
     
     nodes.set(node.id, node);
@@ -220,6 +221,27 @@ function determineNodeTypeCounts(
 }
 
 /**
+ * Emoji options for each node type
+ */
+const NODE_EMOJI_OPTIONS: Record<NodeType, string[]> = {
+  restaurant: [
+    '🍞', '🥐', '🥖', '🥨', '🥯', '🥞', '🧇', '🧀', '🍖', '🍗',
+    '🥩', '🥓', '🍔', '🍟', '🍕', '🌭', '🥪', '🌮', '🌯', '🥙',
+    '🧆', '🥚', '🍳', '🥘', '🍲', '🥣', '🥗', '🍿', '🧈', '🥫',
+    '🍝', '🍱', '🍘', '🍙', '🍚', '🍛', '🍜', '🍠', '🍢', '🍣',
+    '🍤', '🍥', '🥮', '🍡', '🥟', '🥠', '🥡', '🍦', '🍧', '🍨',
+    '🍩', '🍪', '🎂', '🍰', '🧁', '🥧', '🍫', '🍬', '🍭', '🍮',
+    '🍯', '🍇', '🍈', '🍉', '🍊', '🍋', '🍌', '🍍', '🥭', '🍎',
+    '🍏', '🍐', '🍑', '🍒', '🍓'
+  ],
+  supermarket: ['🛒'],
+  pharmacy: ['💊'],
+  residential: ['🏠'],
+  office: ['🏢'],
+  battery_swap: ['🔋'],
+};
+
+/**
  * Generate a name for a node based on its type
  */
 function generateNodeName(type: NodeType, index: number): string {
@@ -233,6 +255,15 @@ function generateNodeName(type: NodeType, index: number): string {
   };
   
   return `${names[type]}_${index}`;
+}
+
+/**
+ * Get a random emoji for a node type
+ */
+function getRandomEmoji(rng: SeededRNG, type: NodeType): string {
+  const options = NODE_EMOJI_OPTIONS[type];
+  const index = rng.nextInt(0, options.length - 1);
+  return options[index];
 }
 
 /**
@@ -272,7 +303,7 @@ function generateEdges(
   }
   
   // Connect nodes on the same vertical street
-  for (const [streetX, streetNodes] of nodesByXStreet) {
+  for (const [, streetNodes] of nodesByXStreet) {
     if (streetNodes.length < 2) continue;
     
     // Sort by Y coordinate
@@ -292,7 +323,7 @@ function generateEdges(
   }
   
   // Connect nodes on the same horizontal street
-  for (const [streetY, streetNodes] of nodesByYStreet) {
+  for (const [, streetNodes] of nodesByYStreet) {
     if (streetNodes.length < 2) continue;
     
     // Sort by X coordinate

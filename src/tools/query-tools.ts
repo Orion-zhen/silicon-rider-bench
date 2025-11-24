@@ -46,7 +46,7 @@ export const getMyStatusTool: ToolDefinition = {
   name: 'get_my_status',
   description: '获取智能体的当前状态，包括位置、电量、携带订单、重量、承载能力和当前时间',
   parameters: {},
-  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<GetMyStatusResponse>> => {
+  handler: async (_params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<GetMyStatusResponse>> => {
     const { agentState, currentTime } = context;
 
     const allOrders = agentState.getCarriedOrders();
@@ -57,6 +57,7 @@ export const getMyStatusTool: ToolDefinition = {
       .map(order => ({
         id: order.id,
         type: order.type,
+        name: order.name,
         weight: order.weight,
         deadline: order.deadline || 0,
         pickupLocation: order.pickupLocation,
@@ -68,6 +69,7 @@ export const getMyStatusTool: ToolDefinition = {
       .map(order => ({
         id: order.id,
         type: order.type,
+        name: order.name,
         weight: order.weight,
         deadline: order.deadline || 0,
         pickupLocation: order.pickupLocation,
@@ -129,6 +131,7 @@ export const searchNearbyOrdersTool: ToolDefinition = {
     const orders = nearbyOrders.map(order => ({
       id: order.id,
       type: order.type,
+      name: order.name,
       deliveryFee: order.deliveryFee,
       weight: order.weight,
       itemPrice: order.itemPrice,
@@ -420,7 +423,7 @@ export const helpTool: ToolDefinition = {
   name: 'help',
   description: '显示帮助信息，包括所有可用工具、游戏规则和策略建议',
   parameters: {},
-  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<{ help: string }>> => {
+  handler: async (_params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<{ help: string }>> => {
     // 从 context 中获取 simulator
     const simulator = context.simulator;
     

@@ -21,6 +21,39 @@ export class ToolExecutor {
   }
 
   /**
+   * 获取工具的用法说明
+   * 
+   * @param toolName 工具名称
+   * @returns 工具用法说明
+   */
+  private getToolUsage(toolName: string): string {
+    const tool = this.registry.getTool(toolName);
+    if (!tool) {
+      return `Tool "${toolName}" does not exist`;
+    }
+
+    const params = Object.entries(tool.parameters)
+      .map(([name, schema]) => {
+        const required = schema.required ? 'required' : 'optional';
+        const typeMap: Record<string, string> = {
+          'string': 'string',
+          'number': 'number',
+          'boolean': 'boolean',
+          'array': 'array',
+          'object': 'object',
+        };
+        const type = typeMap[schema.type] || schema.type;
+        return `${name} (${required}, ${type}${schema.description ? ', ' + schema.description : ''})`;
+      });
+
+    if (params.length === 0) {
+      return `Usage: ${toolName}() - no parameters required`;
+    }
+
+    return `Usage: ${toolName}({${params.join(', ')}})`;
+  }
+
+  /**
    * 执行工具调用
    * 需求：17.2, 17.3
    * 
@@ -50,6 +83,11 @@ export class ToolExecutor {
       // 验证参数
       const validationError = this.registry.validateParameters(toolName, parameters);
       if (validationError) {
+        // 在验证错误消息中添加用法说明
+        const usage = this.getToolUsage(toolName);
+        if (validationError.error) {
+          validationError.error.message = `${validationError.error.message}. ${usage}`;
+        }
         return validationError;
       }
 
@@ -72,11 +110,14 @@ export class ToolExecutor {
       return result;
     } catch (error) {
       // 捕获执行过程中的任何错误
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      const usage = this.getToolUsage(toolName);
+      
       return {
         success: false,
         error: {
           code: 'INVALID_PARAMETER',
-          message: error instanceof Error ? error.message : 'Unknown error occurred',
+          message: `${errorMessage}. ${usage}`,
           details: {
             toolName,
             parameters,
