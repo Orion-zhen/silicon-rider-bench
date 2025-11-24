@@ -363,10 +363,6 @@ class StatsPanel {
               <div class="items-container">${itemsHTML}</div>
             </div>
             <div class="order-detail">
-              <span class="detail-label">Type:</span>
-              <span class="order-type">${order.type}</span>
-            </div>
-            <div class="order-detail">
               <span class="detail-label">Weight:</span>
               <span class="detail-value">${this.formatNumber(order.weight, 1)} kg</span>
             </div>

@@ -286,6 +286,23 @@ class Application {
     this.mapRenderer = null;
     this.statsPanel = null;
     this.chatPanel = null;
+    this.pendingSonarToolName = null;
+    this.pendingPanelData = [];
+    this.modelName = 'AI';
+    
+    // Tool name to Chinese mapping
+    this.toolNameMap = {
+      'get_my_status': '查询状态',
+      'search_nearby_orders': '搜索订单',
+      'search_nearby_battery_stations': '搜索换电站',
+      'accept_order': '接受订单',
+      'move_to': '移动',
+      'pickup_food': '取餐',
+      'deliver_food': '送餐',
+      'swap_battery': '换电',
+      'get_location_info': '查询位置信息',
+      'calculate_distance': '计算距离',
+    };
   }
 
   /**
@@ -378,6 +395,7 @@ class Application {
       // Set model name if available in config
       if (data.config && data.config.modelName) {
         this.statsPanel.setModelName(data.config.modelName);
+        this.modelName = data.config.modelName;
       }
       
       // Update connection status now that stats panel is initialized
@@ -433,6 +451,20 @@ class Application {
    */
   handleConversation(data) {
     console.log('[App] Conversation message:', data);
+    
+    // Show action panel for assistant messages
+    if (data.role === 'assistant' && data.content && this.mapRenderer) {
+      // Truncate long content
+      let displayContent = data.content;
+      if (displayContent.length > 100) {
+        displayContent = displayContent.substring(0, 100) + '...';
+      }
+      
+      const actionText = `${this.modelName}: ${displayContent}`;
+      console.log('[App] Showing conversation action panel:', actionText);
+      this.mapRenderer.showActionPanel(actionText, 'conversation');
+    }
+    
     if (this.chatPanel) {
       this.chatPanel.addMessage(data.role, data.content);
     } else {
@@ -445,6 +477,35 @@ class Application {
    */
   handleToolCall(data) {
     console.log('[App] Tool call:', data);
+    console.log('[App] Tool name:', data.toolName);
+    
+    // Show action panel for tool call
+    if (this.mapRenderer) {
+      const toolNameChinese = this.toolNameMap[data.toolName] || data.toolName;
+      const argsStr = JSON.stringify(data.arguments || {});
+      const actionText = `${toolNameChinese}: 调用 tool ${data.toolName}(${argsStr})`;
+      
+      console.log('[App] Showing action panel:', actionText);
+      this.mapRenderer.showActionPanel(actionText, 'tool-call');
+    }
+    
+    // Show sonar animation for search tools
+    if ((data.toolName === 'search_nearby_orders' || data.toolName === 'search_nearby_battery_stations') && this.mapRenderer) {
+      console.log('[App] Triggering sonar animation for', data.toolName);
+      
+      // Extract radius from arguments
+      const radius = data.arguments && data.arguments.radius ? data.arguments.radius : 10;
+      console.log('[App] Search radius:', radius, 'km');
+      
+      // Store the tool name to handle panels after animation
+      this.pendingSonarToolName = data.toolName;
+      
+      this.mapRenderer.showSonarAnimation(radius, () => {
+        console.log('[App] Sonar animation completed, ready to show panels');
+        // Panels will be shown when tool_result arrives
+      });
+    }
+    
     if (this.chatPanel) {
       this.chatPanel.addToolCall(data.toolName, data.arguments);
     } else {
@@ -457,10 +518,153 @@ class Application {
    */
   handleToolResult(data) {
     console.log('[App] Tool result:', data);
+    console.log('[App] Tool name:', data.toolName);
+    console.log('[App] Success:', data.success);
+    console.log('[App] Result:', data.result);
+    console.log('[App] MapRenderer exists:', !!this.mapRenderer);
+    
+    // Show search result panels for search tools
+    if (data.success && this.mapRenderer) {
+      // 后端返回格式是 {success: true, data: {orders: [...]} }
+      const resultData = data.result && data.result.data ? data.result.data : data.result;
+      
+      if (data.toolName === 'search_nearby_orders' && resultData && resultData.orders) {
+        console.log('[App] Processing search_nearby_orders result');
+        console.log('[App] Orders count:', resultData.orders.length);
+        
+        // Collect panel data
+        const panelDataList = [];
+        resultData.orders.forEach((order, index) => {
+          console.log(`[App] Processing order ${index}:`, order);
+          console.log(`[App] Order pickupLocation:`, order.pickupLocation);
+          
+          if (order.pickupLocation) {
+            // Format deadline time
+            let deadlineStr = 'N/A';
+            if (order.estimatedTimeLimit) {
+              deadlineStr = `${order.estimatedTimeLimit}分钟`;
+            }
+            
+            panelDataList.push({
+              locationId: order.pickupLocation,
+              type: 'order',
+              data: {
+                locationName: order.name,
+                deliveryFee: order.deliveryFee,
+                deadline: deadlineStr
+              }
+            });
+          } else {
+            console.warn(`[App] Order ${index} has no pickupLocation`);
+          }
+        });
+        
+        // Wait for sonar animation to complete before showing panels
+        this.showPanelsAfterSonar(panelDataList);
+        
+      } else if (data.toolName === 'search_nearby_battery_stations' && resultData && resultData.stations) {
+        console.log('[App] Processing search_nearby_battery_stations result');
+        console.log('[App] Stations count:', resultData.stations.length);
+        
+        // Collect panel data
+        const panelDataList = [];
+        resultData.stations.forEach((station, index) => {
+          console.log(`[App] Processing station ${index}:`, station);
+          console.log(`[App] Station id:`, station.id);
+          
+          if (station.id) {
+            panelDataList.push({
+              locationId: station.id,
+              type: 'battery_station',
+              data: {
+                name: station.name
+              }
+            });
+          } else {
+            console.warn(`[App] Station ${index} has no id`);
+          }
+        });
+        
+        // Wait for sonar animation to complete before showing panels
+        this.showPanelsAfterSonar(panelDataList);
+        
+      } else {
+        console.log('[App] Not a search tool or no results');
+        console.log('[App] Conditions check:');
+        console.log('  - Is search_nearby_orders:', data.toolName === 'search_nearby_orders');
+        console.log('  - Is search_nearby_battery_stations:', data.toolName === 'search_nearby_battery_stations');
+        console.log('  - Has result:', !!data.result);
+        console.log('  - Has resultData:', !!resultData);
+        if (resultData) {
+          console.log('  - Has orders:', !!resultData.orders);
+          console.log('  - Has stations:', !!resultData.stations);
+        }
+      }
+    } else {
+      console.log('[App] Skipping panel display:');
+      console.log('  - Success:', data.success);
+      console.log('  - MapRenderer exists:', !!this.mapRenderer);
+    }
+    
     if (this.chatPanel) {
       this.chatPanel.addToolResult(data.toolName, data.success, data.result);
     } else {
       console.warn('[App] Chat panel not initialized');
+    }
+  }
+  
+  /**
+   * Show panels after sonar animation completes
+   */
+  showPanelsAfterSonar(panelDataList) {
+    console.log('[App] Scheduling panels to show after sonar animation');
+    
+    // Check if sonar is currently animating
+    if (this.mapRenderer.isSonarAnimating) {
+      console.log('[App] Sonar is animating, waiting...');
+      // Wait and check again
+      setTimeout(() => {
+        this.showPanelsAfterSonar(panelDataList);
+      }, 100);
+    } else {
+      console.log('[App] Sonar animation complete, showing panels now');
+      
+      // Calculate distances and sort by distance (closest first)
+      const panelsWithDistance = panelDataList.map(panelData => {
+        const distance = this.mapRenderer.calculateDistanceToAgent(panelData.locationId);
+        return { ...panelData, distance };
+      });
+      
+      // Sort by distance (ascending - closest first)
+      panelsWithDistance.sort((a, b) => a.distance - b.distance);
+      
+      console.log('[App] Panels sorted by distance:', panelsWithDistance.map(p => ({
+        id: p.locationId,
+        distance: p.distance
+      })));
+      
+      // Show panels with delay based on distance order
+      const delayBetweenPanels = 150; // 150ms between each panel
+      
+      panelsWithDistance.forEach((panelData, index) => {
+        const delay = index * delayBetweenPanels;
+        
+        setTimeout(() => {
+          console.log(`[App] Showing panel ${index + 1}/${panelsWithDistance.length} for ${panelData.locationId} (distance: ${panelData.distance.toFixed(2)})`);
+          
+          // Calculate auto-hide duration: closer panels disappear sooner
+          // Base duration: 10 seconds
+          // Closest panel: 10s, furthest panel: 10s + (count-1) * 1s
+          const autoHideDuration = 10000 + (index * 1000);
+          
+          this.mapRenderer.showSearchResultPanel(
+            panelData.locationId,
+            panelData.type,
+            panelData.data,
+            autoHideDuration
+          );
+        }, delay);
+      });
     }
   }
 

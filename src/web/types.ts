@@ -135,6 +135,8 @@ export interface ToolResultMessage extends WebSocketMessage {
     toolName: string;
     success: boolean;
     result: any;
+    // 添加搜索相关的额外信息
+    searchRadius?: number;
   };
 }
 
