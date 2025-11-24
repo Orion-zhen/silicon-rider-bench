@@ -216,8 +216,43 @@ export class AIClient {
           console.log('==================\n');
         }
 
-        // 调用 AI 模型
-        const response = await this.client.chat.completions.create(requestBody);
+        // 调用 AI 模型（带重试机制）
+        let response = null;
+        let retryCount = 0;
+        const maxRetries = 3;
+        const retryDelay = 2000; // 2 seconds
+        
+        while (retryCount <= maxRetries) {
+          try {
+            response = await this.client.chat.completions.create(requestBody);
+            break; // Success, exit retry loop
+          } catch (apiError: any) {
+            retryCount++;
+            
+            // Check if it's a network/JSON error that we should retry
+            const isRetryableError = 
+              apiError.type === 'invalid-json' ||
+              apiError.message?.includes('Unexpected end of JSON') ||
+              apiError.message?.includes('ECONNRESET') ||
+              apiError.message?.includes('ETIMEDOUT') ||
+              apiError.code === 'ECONNRESET' ||
+              apiError.code === 'ETIMEDOUT';
+            
+            if (isRetryableError && retryCount <= maxRetries) {
+              console.warn(`⚠️  API request failed (attempt ${retryCount}/${maxRetries}): ${apiError.message}`);
+              console.log(`   Retrying in ${retryDelay / 1000} seconds...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+            } else {
+              // Non-retryable error or max retries reached
+              throw apiError;
+            }
+          }
+        }
+        
+        // If response is still null after retries, throw error
+        if (!response) {
+          throw new Error('Failed to get response from AI after multiple retries');
+        }
 
         // 更新 token 使用量统计
         if (response.usage) {

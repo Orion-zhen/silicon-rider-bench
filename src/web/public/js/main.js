@@ -3,6 +3,8 @@
  * Main Client Logic
  * 
  * Handles WebSocket connection, message routing, and connection state management
+ * 
+ * Version: 1.1.0 - Fixed undefined toFixed() error
  */
 
 // ============================================================================
@@ -76,8 +78,6 @@ class ConnectionManager {
     try {
       const message = JSON.parse(data);
       
-      console.log('[WebSocket] Received message:', message.type, message);
-      
       if (!message.type) {
         console.warn('[WebSocket] Message missing type field:', message);
         return;
@@ -86,7 +86,6 @@ class ConnectionManager {
       // Route message to registered handlers
       const handlers = this.messageHandlers.get(message.type);
       if (handlers && handlers.length > 0) {
-        console.log(`[WebSocket] Routing to ${handlers.length} handler(s) for type: ${message.type}`);
         handlers.forEach(handler => {
           try {
             handler(message);
@@ -231,30 +230,18 @@ class UIManager {
    * Initialize UI elements
    */
   initialize() {
-    console.log('[UI] Initializing UI elements...');
-    
     this.mapContainer = document.getElementById('map-container');
     this.statsContainer = document.getElementById('stats-panel');
     this.chatContainer = document.getElementById('chat-panel');
 
-    console.log('[UI] Map container:', this.mapContainer);
-    console.log('[UI] Stats container:', this.statsContainer);
-    console.log('[UI] Chat container:', this.chatContainer);
-
     if (!this.mapContainer) {
-      console.error('[UI] ❌ Map container element not found');
-    } else {
-      console.log('[UI] ✓ Map container found');
+      console.error('[UI] Map container element not found');
     }
     if (!this.statsContainer) {
-      console.error('[UI] ❌ Stats container element not found');
-    } else {
-      console.log('[UI] ✓ Stats container found');
+      console.error('[UI] Stats container element not found');
     }
     if (!this.chatContainer) {
-      console.error('[UI] ❌ Chat container element not found');
-    } else {
-      console.log('[UI] ✓ Chat container found');
+      console.error('[UI] Chat container element not found');
     }
   }
 
@@ -302,6 +289,7 @@ class Application {
       'swap_battery': '换电',
       'get_location_info': '查询位置信息',
       'calculate_distance': '计算距离',
+      'estimate_time': '估算时间',
     };
   }
 
@@ -332,7 +320,6 @@ class Application {
   registerMessageHandlers() {
     // Handle initialization message
     this.connectionManager.on('init', (message) => {
-      console.log('[App] Received init message:', message.data);
       this.handleInit(message.data);
     });
 
@@ -358,7 +345,6 @@ class Application {
 
     // Handle simulation end
     this.connectionManager.on('simulation_end', (message) => {
-      console.log('[App] Simulation ended:', message.data);
       this.handleSimulationEnd(message.data);
     });
 
@@ -373,24 +359,18 @@ class Application {
    * Handle initialization message
    */
   handleInit(data) {
-    console.log('[App] Initializing with data:', data);
-    
     // Initialize map renderer when available
     if (typeof MapRenderer !== 'undefined' && this.uiManager.mapContainer) {
-      console.log('[App] Creating MapRenderer...');
       this.mapRenderer = new MapRenderer(this.uiManager.mapContainer);
       this.mapRenderer.initialize(data.nodes, data.edges);
       this.mapRenderer.render();
-      console.log('[App] MapRenderer initialized');
     } else {
       console.warn('[App] MapRenderer not available or container not found');
     }
 
     // Initialize stats panel when available
     if (typeof StatsPanel !== 'undefined' && this.uiManager.statsContainer) {
-      console.log('[App] Creating StatsPanel...');
       this.statsPanel = new StatsPanel(this.uiManager.statsContainer);
-      console.log('[App] StatsPanel initialized');
       
       // Set model name if available in config
       if (data.config && data.config.modelName) {
@@ -406,9 +386,7 @@ class Application {
 
     // Initialize chat panel when available
     if (typeof ChatPanel !== 'undefined' && this.uiManager.chatContainer) {
-      console.log('[App] Creating ChatPanel...');
       this.chatPanel = new ChatPanel(this.uiManager.chatContainer);
-      console.log('[App] ChatPanel initialized');
     } else {
       console.warn('[App] ChatPanel not available or container not found');
     }
@@ -418,20 +396,14 @@ class Application {
    * Handle state update message
    */
   handleStateUpdate(data) {
-    console.log('[App] State update:', data);
-    
     // Update map renderer
     if (this.mapRenderer) {
-      console.log('[App] Updating map renderer with position:', data.agentState.position);
       this.mapRenderer.updateAgentPosition(data.agentState.position);
       this.mapRenderer.render();
-    } else {
-      console.warn('[App] Map renderer not initialized');
     }
 
     // Update stats panel
     if (this.statsPanel) {
-      console.log('[App] Updating stats panel');
       this.statsPanel.update(
         data.agentState, 
         data.formattedTime,
@@ -441,8 +413,6 @@ class Application {
         data.cumulativeTotalTokens,
         data.currentTime
       );
-    } else {
-      console.warn('[App] Stats panel not initialized');
     }
   }
 
@@ -450,8 +420,6 @@ class Application {
    * Handle conversation message
    */
   handleConversation(data) {
-    console.log('[App] Conversation message:', data);
-    
     // Show action panel for assistant messages
     if (data.role === 'assistant' && data.content && this.mapRenderer) {
       // Truncate long content
@@ -461,14 +429,11 @@ class Application {
       }
       
       const actionText = `${this.modelName}: ${displayContent}`;
-      console.log('[App] Showing conversation action panel:', actionText);
       this.mapRenderer.showActionPanel(actionText, 'conversation');
     }
     
     if (this.chatPanel) {
       this.chatPanel.addMessage(data.role, data.content);
-    } else {
-      console.warn('[App] Chat panel not initialized');
     }
   }
 
@@ -476,40 +441,51 @@ class Application {
    * Handle tool call message
    */
   handleToolCall(data) {
-    console.log('[App] Tool call:', data);
-    console.log('[App] Tool name:', data.toolName);
+    console.log('[App] handleToolCall called:', data.toolName, 'mapRenderer exists:', !!this.mapRenderer);
     
     // Show action panel for tool call
     if (this.mapRenderer) {
       const toolNameChinese = this.toolNameMap[data.toolName] || data.toolName;
       const argsStr = JSON.stringify(data.arguments || {});
-      const actionText = `${toolNameChinese}: 调用 tool ${data.toolName}(${argsStr})`;
       
-      console.log('[App] Showing action panel:', actionText);
-      this.mapRenderer.showActionPanel(actionText, 'tool-call');
+      // Create HTML with badge for action name
+      const actionHtml = `<span class="tool-action-badge">${toolNameChinese}</span> 调用 tool ${data.toolName}(${argsStr})`;
+      
+      this.mapRenderer.showActionPanel(actionHtml, 'tool-call');
+      
+      // Show critical hit animation for specific actions
+      const criticalHitMap = {
+        'pickup_food': '➕🍱',
+        'deliver_food': '➖🍱',
+        'swap_battery': '➕🔋',
+        'accept_order': '➕📋'
+      };
+      
+      if (criticalHitMap[data.toolName]) {
+        console.log('[App] ✨ Tool matches critical hit map:', data.toolName, '→', criticalHitMap[data.toolName]);
+        console.log('[App] Agent position:', this.mapRenderer.agentPosition);
+        console.log('[App] Agent element exists:', !!this.mapRenderer.agentElement);
+        this.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName]);
+      } else {
+        console.log('[App] Tool does NOT match critical hit map:', data.toolName);
+      }
+    } else {
+      console.warn('[App] mapRenderer not available for tool call:', data.toolName);
     }
     
     // Show sonar animation for search tools
     if ((data.toolName === 'search_nearby_orders' || data.toolName === 'search_nearby_battery_stations') && this.mapRenderer) {
-      console.log('[App] Triggering sonar animation for', data.toolName);
-      
       // Extract radius from arguments
       const radius = data.arguments && data.arguments.radius ? data.arguments.radius : 10;
-      console.log('[App] Search radius:', radius, 'km');
       
       // Store the tool name to handle panels after animation
       this.pendingSonarToolName = data.toolName;
       
-      this.mapRenderer.showSonarAnimation(radius, () => {
-        console.log('[App] Sonar animation completed, ready to show panels');
-        // Panels will be shown when tool_result arrives
-      });
+      this.mapRenderer.showSonarAnimation(radius);
     }
     
     if (this.chatPanel) {
       this.chatPanel.addToolCall(data.toolName, data.arguments);
-    } else {
-      console.warn('[App] Chat panel not initialized');
     }
   }
 
@@ -517,27 +493,20 @@ class Application {
    * Handle tool result message
    */
   handleToolResult(data) {
-    console.log('[App] Tool result:', data);
-    console.log('[App] Tool name:', data.toolName);
-    console.log('[App] Success:', data.success);
-    console.log('[App] Result:', data.result);
-    console.log('[App] MapRenderer exists:', !!this.mapRenderer);
-    
     // Show search result panels for search tools
     if (data.success && this.mapRenderer) {
       // 后端返回格式是 {success: true, data: {orders: [...]} }
       const resultData = data.result && data.result.data ? data.result.data : data.result;
       
+      // Debug log for path-related tools
+      if (data.toolName === 'calculate_distance' || data.toolName === 'estimate_time') {
+        console.log('[App] Tool result data:', data.toolName, resultData);
+      }
+      
       if (data.toolName === 'search_nearby_orders' && resultData && resultData.orders) {
-        console.log('[App] Processing search_nearby_orders result');
-        console.log('[App] Orders count:', resultData.orders.length);
-        
         // Collect panel data
         const panelDataList = [];
-        resultData.orders.forEach((order, index) => {
-          console.log(`[App] Processing order ${index}:`, order);
-          console.log(`[App] Order pickupLocation:`, order.pickupLocation);
-          
+        resultData.orders.forEach((order) => {
           if (order.pickupLocation) {
             // Format deadline time
             let deadlineStr = 'N/A';
@@ -554,8 +523,6 @@ class Application {
                 deadline: deadlineStr
               }
             });
-          } else {
-            console.warn(`[App] Order ${index} has no pickupLocation`);
           }
         });
         
@@ -563,15 +530,9 @@ class Application {
         this.showPanelsAfterSonar(panelDataList);
         
       } else if (data.toolName === 'search_nearby_battery_stations' && resultData && resultData.stations) {
-        console.log('[App] Processing search_nearby_battery_stations result');
-        console.log('[App] Stations count:', resultData.stations.length);
-        
         // Collect panel data
         const panelDataList = [];
-        resultData.stations.forEach((station, index) => {
-          console.log(`[App] Processing station ${index}:`, station);
-          console.log(`[App] Station id:`, station.id);
-          
+        resultData.stations.forEach((station) => {
           if (station.id) {
             panelDataList.push({
               locationId: station.id,
@@ -580,36 +541,76 @@ class Application {
                 name: station.name
               }
             });
-          } else {
-            console.warn(`[App] Station ${index} has no id`);
           }
         });
         
         // Wait for sonar animation to complete before showing panels
         this.showPanelsAfterSonar(panelDataList);
         
-      } else {
-        console.log('[App] Not a search tool or no results');
-        console.log('[App] Conditions check:');
-        console.log('  - Is search_nearby_orders:', data.toolName === 'search_nearby_orders');
-        console.log('  - Is search_nearby_battery_stations:', data.toolName === 'search_nearby_battery_stations');
-        console.log('  - Has result:', !!data.result);
-        console.log('  - Has resultData:', !!resultData);
-        if (resultData) {
-          console.log('  - Has orders:', !!resultData.orders);
-          console.log('  - Has stations:', !!resultData.stations);
-        }
+      } else if (data.toolName === 'get_location_info' && resultData && resultData.id) {
+        // Show location info panel at the target location (non-blocking, with 0.5s delay)
+        setTimeout(() => {
+          this.mapRenderer.showLocationInfoPanel(resultData.id, {
+            name: resultData.name || 'Unknown',
+            type: resultData.type || 'unknown',
+            position: resultData.position || { x: 0, y: 0 }
+          });
+        }, 500);
+        
+      } else if (data.toolName === 'calculate_distance' && resultData && resultData.path) {
+        // Show path animation with green color (non-blocking, with 0.5s delay)
+        setTimeout(() => {
+          // Safely extract distance with default
+          const distance = typeof resultData.distance === 'number' ? resultData.distance : 0;
+          
+          this.mapRenderer.showPathAnimation(
+            resultData.path,
+            'green',
+            {
+              distance: distance.toFixed(2) + ' km'
+            }
+          );
+        }, 500);
+        
+      } else if (data.toolName === 'estimate_time' && resultData && resultData.segments) {
+        // Show path animation with blue color (non-blocking, with 0.5s delay)
+        setTimeout(() => {
+          // Extract path from segments
+          const path = [];
+          let totalDistance = 0;
+          
+          if (resultData.segments && resultData.segments.length > 0) {
+            // Add first node
+            path.push(resultData.segments[0].from);
+            
+            // Add all 'to' nodes and calculate total distance
+            resultData.segments.forEach(segment => {
+              path.push(segment.to);
+              totalDistance += segment.distance || 0;
+            });
+          }
+          
+          // Safely extract time with default
+          const totalTime = typeof resultData.totalTime === 'number' ? resultData.totalTime : 0;
+          
+          console.log('[App] estimate_time path:', path, 'distance:', totalDistance, 'time:', totalTime);
+          
+          if (path.length >= 2) {
+            this.mapRenderer.showPathAnimation(
+              path,
+              'blue',
+              {
+                time: totalTime.toFixed(2) + ' 分钟',
+                distance: totalDistance.toFixed(2) + ' km'
+              }
+            );
+          }
+        }, 500);
       }
-    } else {
-      console.log('[App] Skipping panel display:');
-      console.log('  - Success:', data.success);
-      console.log('  - MapRenderer exists:', !!this.mapRenderer);
     }
     
     if (this.chatPanel) {
       this.chatPanel.addToolResult(data.toolName, data.success, data.result);
-    } else {
-      console.warn('[App] Chat panel not initialized');
     }
   }
   
@@ -617,18 +618,13 @@ class Application {
    * Show panels after sonar animation completes
    */
   showPanelsAfterSonar(panelDataList) {
-    console.log('[App] Scheduling panels to show after sonar animation');
-    
     // Check if sonar is currently animating
     if (this.mapRenderer.isSonarAnimating) {
-      console.log('[App] Sonar is animating, waiting...');
       // Wait and check again
       setTimeout(() => {
         this.showPanelsAfterSonar(panelDataList);
       }, 100);
     } else {
-      console.log('[App] Sonar animation complete, showing panels now');
-      
       // Calculate distances and sort by distance (closest first)
       const panelsWithDistance = panelDataList.map(panelData => {
         const distance = this.mapRenderer.calculateDistanceToAgent(panelData.locationId);
@@ -638,11 +634,6 @@ class Application {
       // Sort by distance (ascending - closest first)
       panelsWithDistance.sort((a, b) => a.distance - b.distance);
       
-      console.log('[App] Panels sorted by distance:', panelsWithDistance.map(p => ({
-        id: p.locationId,
-        distance: p.distance
-      })));
-      
       // Show panels with delay based on distance order
       const delayBetweenPanels = 150; // 150ms between each panel
       
@@ -650,8 +641,6 @@ class Application {
         const delay = index * delayBetweenPanels;
         
         setTimeout(() => {
-          console.log(`[App] Showing panel ${index + 1}/${panelsWithDistance.length} for ${panelData.locationId} (distance: ${panelData.distance.toFixed(2)})`);
-          
           // Calculate auto-hide duration: closer panels disappear sooner
           // Base duration: 10 seconds
           // Closest panel: 10s, furthest panel: 10s + (count-1) * 1s
@@ -681,36 +670,22 @@ class Application {
    * Update connection status in stats panel
    */
   updateConnectionStatusInStats(connected, reconnecting = false) {
-    console.log('[App] Updating connection status:', { connected, reconnecting });
-    
-    if (!this.statsPanel) {
-      console.warn('[App] Stats panel not initialized yet');
-      return;
-    }
-    
-    if (!this.statsPanel.elements || !this.statsPanel.elements.connectionStatus) {
-      console.warn('[App] Connection status element not found in stats panel');
+    if (!this.statsPanel || !this.statsPanel.elements || !this.statsPanel.elements.connectionStatus) {
       return;
     }
     
     const statusElement = this.statsPanel.elements.connectionStatus;
     const statusText = statusElement.querySelector('.status-text');
     
-    console.log('[App] Status element:', statusElement);
-    console.log('[App] Status text element:', statusText);
-    
     if (connected) {
       if (statusText) statusText.textContent = 'Connected';
       statusElement.className = 'connection-status connected';
-      console.log('[App] Set status to connected');
     } else if (reconnecting) {
       if (statusText) statusText.textContent = 'Reconnecting...';
       statusElement.className = 'connection-status reconnecting';
-      console.log('[App] Set status to reconnecting');
     } else {
       if (statusText) statusText.textContent = 'Disconnected';
       statusElement.className = 'connection-status disconnected';
-      console.log('[App] Set status to disconnected');
     }
   }
 }

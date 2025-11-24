@@ -28,15 +28,21 @@ class MapRenderer {
     
     // Action panels tracking (follows agent)
     this.actionPanels = []; // Array of { panel: element, timer: timeoutId }
-    this.actionPanelQueue = []; // Queue for sequential display
-    this.isShowingActionPanel = false;
+    this.panelUpdateInterval = null; // Interval for updating panel positions during animation
     
     // Sonar animation queue
     this.sonarQueue = [];
     this.isSonarAnimating = false;
+    this.currentSonarWave = null;
     
     // Panel auto-hide duration (10 seconds)
     this.panelAutoHideDuration = 10000;
+    
+    // Location info panels tracking
+    this.locationInfoPanels = new Map(); // locationId -> { panel: element, timer: timeoutId }
+    
+    // Path animation tracking
+    this.pathAnimations = []; // Array of { lines: SVGElement[], panel: element, timer: timeoutId }
     
     // Node type to emoji mapping
     this.NODE_EMOJI_MAP = {
@@ -53,8 +59,6 @@ class MapRenderer {
    * Initialize map with nodes and edges data
    */
   initialize(nodes, edges) {
-    console.log('[MapRenderer] Initializing with', nodes.length, 'nodes and', edges.length, 'edges');
-    
     this.nodes.clear();
     this.edges = edges || [];
     
@@ -80,8 +84,6 @@ class MapRenderer {
     });
     
     this.bounds = { minX, maxX, minY, maxY };
-    console.log('[MapRenderer] Bounds:', this.bounds);
-    console.log('[MapRenderer] Container dimensions:', this.container.clientWidth, 'x', this.container.clientHeight);
     
     this.isDirty = true;
     this.scheduleRender();
@@ -176,7 +178,6 @@ class MapRenderer {
     
     // Find path between nodes
     const path = this.findPath(fromNodeId, toNodeId);
-    console.log('[MapRenderer] Animating along path:', path);
     
     // 标记正在动画中
     this.isAnimating = true;
@@ -195,6 +196,11 @@ class MapRenderer {
       if (this.agentElement) {
         this.agentElement.style.transition = '';
       }
+      // Clear the update interval
+      if (this.panelUpdateInterval) {
+        clearInterval(this.panelUpdateInterval);
+        this.panelUpdateInterval = null;
+      }
       return;
     }
     
@@ -203,6 +209,10 @@ class MapRenderer {
     
     if (!node || !this.agentElement) {
       this.isAnimating = false;
+      if (this.panelUpdateInterval) {
+        clearInterval(this.panelUpdateInterval);
+        this.panelUpdateInterval = null;
+      }
       return;
     }
     
@@ -219,6 +229,13 @@ class MapRenderer {
       // Update action panel positions
       this.updateActionPanelPositions();
       
+      // Start continuous update interval for action panels
+      if (!this.panelUpdateInterval && this.actionPanels.length > 0) {
+        this.panelUpdateInterval = setInterval(() => {
+          this.updateActionPanelPositions();
+        }, 16); // Update every ~16ms (60fps)
+      }
+      
       // Move to next segment immediately
       this.animateAlongPath(path, index + 1);
     } else {
@@ -227,8 +244,12 @@ class MapRenderer {
       this.agentElement.style.left = `${pos.x}px`;
       this.agentElement.style.top = `${pos.y}px`;
       
-      // Update action panel positions (they will follow with transition)
-      this.updateActionPanelPositions();
+      // Ensure update interval is running if we have action panels
+      if (!this.panelUpdateInterval && this.actionPanels.length > 0) {
+        this.panelUpdateInterval = setInterval(() => {
+          this.updateActionPanelPositions();
+        }, 16); // Update every ~16ms (60fps)
+      }
       
       // Move to next segment after animation completes
       setTimeout(() => {
@@ -285,7 +306,6 @@ class MapRenderer {
    * @param {Function} onComplete - Callback function to execute after animation completes
    */
   showSonarAnimation(radiusKm, onComplete) {
-    console.log('[MapRenderer] showSonarAnimation called with radius:', radiusKm, 'km');
     this.sonarQueue.push({ radiusKm: radiusKm || 10, onComplete });
     this.processNextSonar();
   }
@@ -305,7 +325,6 @@ class MapRenderer {
     const onComplete = sonarData.onComplete;
     
     if (!this.agentPosition || !this.agentElement) {
-      console.log('[MapRenderer] Cannot show sonar: no agent position or element');
       // Try next in queue
       this.processNextSonar();
       return;
@@ -313,13 +332,11 @@ class MapRenderer {
     
     const agentNode = this.nodes.get(this.agentPosition);
     if (!agentNode) {
-      console.log('[MapRenderer] Cannot show sonar: agent node not found');
       // Try next in queue
       this.processNextSonar();
       return;
     }
     
-    console.log('[MapRenderer] Starting sonar animation with radius:', radiusKm, 'km');
     this.isSonarAnimating = true;
     
     const pos = this.worldToScreen(agentNode.x, agentNode.y);
@@ -343,11 +360,6 @@ class MapRenderer {
     
     const radiusPixels = worldRadius * scale * 2 * 1.2; // Diameter + 20% increase
     
-    console.log('[MapRenderer] Sonar animation details:');
-    console.log('  - World radius:', worldRadius, 'units');
-    console.log('  - Screen radius:', radiusPixels, 'pixels (with 20% increase)');
-    console.log('  - Scale:', scale);
-    
     // Create sonar wave element
     const sonarWave = document.createElement('div');
     sonarWave.className = 'sonar-wave';
@@ -358,22 +370,36 @@ class MapRenderer {
     sonarWave.style.setProperty('--sonar-max-size', `${radiusPixels}px`);
     
     this.container.appendChild(sonarWave);
-    console.log('[MapRenderer] Sonar wave element created and appended');
+    
+    // Store reference to sonar wave for position updates
+    this.currentSonarWave = sonarWave;
+    
+    // Update sonar position to follow agent element's actual position during movement
+    const updateInterval = setInterval(() => {
+      if (this.agentElement && sonarWave.parentNode) {
+        // Get agent element's current computed position (during animation)
+        const agentLeft = parseFloat(this.agentElement.style.left) || pos.x;
+        const agentTop = parseFloat(this.agentElement.style.top) || pos.y;
+        
+        sonarWave.style.left = `${agentLeft}px`;
+        sonarWave.style.top = `${agentTop}px`;
+      }
+    }, 16); // Update every ~16ms (60fps)
     
     // Animation duration: 1.33s (1330ms)
     const animationDuration = 1330;
     
     // Remove after animation completes and process next
     setTimeout(() => {
+      clearInterval(updateInterval);
       if (sonarWave.parentNode) {
         sonarWave.parentNode.removeChild(sonarWave);
       }
-      console.log('[MapRenderer] Sonar animation completed');
+      this.currentSonarWave = null;
       this.isSonarAnimating = false;
       
       // Execute callback if provided
       if (onComplete && typeof onComplete === 'function') {
-        console.log('[MapRenderer] Executing onComplete callback');
         onComplete();
       }
       
@@ -410,76 +436,138 @@ class MapRenderer {
   }
   
   /**
-   * Show action panel near agent (queued for sequential display)
+   * Show critical hit animation near agent (game-style popup)
+   * @param {string} emoji - Emoji to display (e.g., "➕🍱", "➖🍱", "➕🔋", "➕📋")
+   */
+  showCriticalHitAnimation(emoji) {
+    console.log('[MapRenderer] 🎯 showCriticalHitAnimation called with emoji:', emoji);
+    console.log('[MapRenderer] Container exists:', !!this.container);
+    console.log('[MapRenderer] Agent position:', this.agentPosition);
+    console.log('[MapRenderer] Agent element exists:', !!this.agentElement);
+    
+    // If agent element doesn't exist yet, try to get position from agentPosition
+    let agentLeft, agentTop;
+    
+    if (this.agentElement) {
+      agentLeft = parseFloat(this.agentElement.style.left);
+      agentTop = parseFloat(this.agentElement.style.top);
+      console.log('[MapRenderer] ✅ Got position from agent element:', agentLeft, agentTop);
+    } else {
+      console.log('[MapRenderer] ⚠️  Agent element not available, using fallback');
+    }
+    
+    // Fallback: calculate position from agentPosition node
+    if (isNaN(agentLeft) || isNaN(agentTop)) {
+      console.log('[MapRenderer] Position is NaN, calculating from node...');
+      
+      if (!this.agentPosition) {
+        console.error('[MapRenderer] ❌ Cannot show critical hit: no agent position');
+        return;
+      }
+      
+      const agentNode = this.nodes.get(this.agentPosition);
+      if (!agentNode) {
+        console.error('[MapRenderer] ❌ Cannot show critical hit: agent node not found for:', this.agentPosition);
+        return;
+      }
+      
+      const pos = this.worldToScreen(agentNode.x, agentNode.y);
+      agentLeft = pos.x;
+      agentTop = pos.y;
+      console.log('[MapRenderer] ✅ Calculated position from node:', agentLeft, agentTop, 'node:', agentNode);
+    }
+    
+    // Create critical hit element
+    const criticalHit = document.createElement('div');
+    criticalHit.className = 'critical-hit-animation';
+    criticalHit.textContent = emoji;
+    
+    // Position at top-left of agent (offset by -30px)
+    criticalHit.style.left = `${agentLeft}px`;
+    criticalHit.style.top = `${agentTop}px`;
+    // Use transform to offset from agent position
+    criticalHit.style.transformOrigin = 'center center';
+    
+    console.log('[MapRenderer] 💥 Critical hit element created:');
+    console.log('  - Position:', criticalHit.style.left, criticalHit.style.top);
+    console.log('  - Class:', criticalHit.className);
+    console.log('  - Content:', criticalHit.textContent);
+    console.log('  - Element:', criticalHit);
+    
+    this.container.appendChild(criticalHit);
+    console.log('[MapRenderer] ✅ Critical hit appended to container');
+    console.log('  - Container children count:', this.container.children.length);
+    console.log('  - Element in DOM:', document.body.contains(criticalHit));
+    
+    // Remove after animation completes (1.2s)
+    setTimeout(() => {
+      if (criticalHit.parentNode) {
+        criticalHit.parentNode.removeChild(criticalHit);
+        console.log('[MapRenderer] 🗑️  Critical hit removed after animation');
+      } else {
+        console.warn('[MapRenderer] ⚠️  Critical hit already removed from DOM');
+      }
+    }, 1200);
+  }
+  
+  /**
+   * Show action panel near agent (non-blocking, stacks vertically)
    * @param {string} content - Panel content
    * @param {string} type - 'tool-call' or 'conversation'
    */
   showActionPanel(content, type = 'tool-call') {
-    console.log('[MapRenderer] Queueing action panel:', content, type);
-    this.actionPanelQueue.push({ content, type });
-    this.processNextActionPanel();
-  }
-  
-  /**
-   * Process next action panel in queue
-   */
-  processNextActionPanel() {
-    // If already showing a panel or queue is empty, return
-    if (this.isShowingActionPanel || this.actionPanelQueue.length === 0) {
-      return;
-    }
-    
-    const panelData = this.actionPanelQueue.shift();
-    this.isShowingActionPanel = true;
-    
-    console.log('[MapRenderer] Showing action panel:', panelData.content);
-    
     if (!this.agentPosition || !this.agentElement) {
-      console.warn('[MapRenderer] Cannot show action panel: no agent');
-      this.isShowingActionPanel = false;
-      this.processNextActionPanel();
       return;
     }
     
     const agentNode = this.nodes.get(this.agentPosition);
     if (!agentNode) {
-      console.warn('[MapRenderer] Cannot show action panel: agent node not found');
-      this.isShowingActionPanel = false;
-      this.processNextActionPanel();
       return;
     }
     
     const pos = this.worldToScreen(agentNode.x, agentNode.y);
     
+    // Make all existing panels of the same type semi-transparent (85%)
+    this.actionPanels.forEach(panelData => {
+      if (panelData.panel && panelData.type === type) {
+        panelData.panel.style.opacity = '0.85';
+      }
+    });
+    
     // Create action panel
     const panel = document.createElement('div');
-    panel.className = `action-panel ${panelData.type}`;
+    panel.className = `action-panel ${type}`;
     panel.style.left = `${pos.x}px`;
     panel.style.top = `${pos.y}px`;
-    panel.style.transform = 'translate(10px, -100%)'; // Right-top of agent
+    panel.style.opacity = '1'; // New panel is fully opaque
+    
+    // Position at bottom (closest to agent) - no offset for first panel
+    panel.style.transform = `translate(10px, -100%)`; // Start at bottom position
     
     const contentDiv = document.createElement('div');
     contentDiv.className = 'action-panel-content';
-    contentDiv.textContent = panelData.content;
+    
+    // Use innerHTML for tool-call to support badge styling, textContent for conversation for security
+    if (type === 'tool-call') {
+      contentDiv.innerHTML = content;
+    } else {
+      contentDiv.textContent = content;
+    }
+    
     panel.appendChild(contentDiv);
     
     this.container.appendChild(panel);
     
     // Set up auto-hide timer (10 seconds)
     const timer = setTimeout(() => {
-      console.log('[MapRenderer] Auto-hiding action panel');
       this.removeActionPanel(panel);
-      
-      // Wait 1 second before showing next panel
-      setTimeout(() => {
-        this.isShowingActionPanel = false;
-        this.processNextActionPanel();
-      }, 1000);
     }, this.panelAutoHideDuration);
     
-    // Track the panel
-    this.actionPanels.push({ panel, timer });
-    console.log('[MapRenderer] Action panel created and tracked');
+    // Track the panel with its type (insert at beginning so new panels are at index 0)
+    this.actionPanels.unshift({ panel, timer, type });
+    
+    // Update all panel positions after adding new one
+    this.updateActionPanelPositions();
   }
   
   /**
@@ -489,6 +577,7 @@ class MapRenderer {
     const index = this.actionPanels.findIndex(p => p.panel === panelElement);
     if (index !== -1) {
       const panelData = this.actionPanels[index];
+      const removedType = panelData.type;
       
       // Clear timer
       if (panelData.timer) {
@@ -502,7 +591,29 @@ class MapRenderer {
       
       // Remove from tracking
       this.actionPanels.splice(index, 1);
-      console.log('[MapRenderer] Action panel removed');
+      
+      // If no more action panels, stop the update interval
+      if (this.actionPanels.length === 0 && this.panelUpdateInterval) {
+        clearInterval(this.panelUpdateInterval);
+        this.panelUpdateInterval = null;
+      }
+      
+      // Update opacity: the newest panel of the same type should be fully opaque
+      let foundNewest = false;
+      for (let i = 0; i < this.actionPanels.length; i++) {
+        const pd = this.actionPanels[i];
+        if (pd.panel && pd.type === removedType) {
+          if (!foundNewest) {
+            pd.panel.style.opacity = '1'; // Newest of this type
+            foundNewest = true;
+          } else {
+            pd.panel.style.opacity = '0.85'; // Older panels
+          }
+        }
+      }
+      
+      // Update positions of remaining panels
+      this.updateActionPanelPositions();
     }
   }
   
@@ -510,24 +621,37 @@ class MapRenderer {
    * Update action panel positions when agent moves
    */
   updateActionPanelPositions() {
-    if (!this.agentPosition || this.actionPanels.length === 0) {
+    if (!this.agentElement || this.actionPanels.length === 0) {
       return;
     }
     
-    const agentNode = this.nodes.get(this.agentPosition);
-    if (!agentNode) {
+    // Get agent element's current computed position (during animation)
+    const agentLeft = parseFloat(this.agentElement.style.left);
+    const agentTop = parseFloat(this.agentElement.style.top);
+    
+    if (isNaN(agentLeft) || isNaN(agentTop)) {
       return;
     }
-    
-    const pos = this.worldToScreen(agentNode.x, agentNode.y);
     
     // Update all action panel positions
-    this.actionPanels.forEach(panelData => {
+    // Index 0 is the newest (bottom, closest to agent)
+    // Higher indices are older (stacked upward)
+    let cumulativeOffset = 0;
+    
+    for (let i = 0; i < this.actionPanels.length; i++) {
+      const panelData = this.actionPanels[i];
+      
       if (panelData.panel) {
-        panelData.panel.style.left = `${pos.x}px`;
-        panelData.panel.style.top = `${pos.y}px`;
+        panelData.panel.style.left = `${agentLeft}px`;
+        panelData.panel.style.top = `${agentTop}px`;
+        panelData.panel.style.transform = `translate(10px, calc(-100% - ${cumulativeOffset}px))`;
+        
+        // Add this panel's height plus gap for next panel (going upward)
+        if (panelData.panel.offsetHeight) {
+          cumulativeOffset += panelData.panel.offsetHeight + 10; // 10px gap
+        }
       }
-    });
+    }
   }
   
   /**
@@ -538,15 +662,9 @@ class MapRenderer {
    * @param {number} autoHideDuration - Custom auto-hide duration in ms (optional)
    */
   showSearchResultPanel(locationId, type, data, autoHideDuration) {
-    console.log('[MapRenderer] showSearchResultPanel called');
-    console.log('[MapRenderer] locationId:', locationId);
-    console.log('[MapRenderer] type:', type);
-    console.log('[MapRenderer] data:', data);
-    console.log('[MapRenderer] Current panels count:', this.searchPanels.size);
     
     // If panel already exists, reset its timer
     if (this.searchPanels.has(locationId)) {
-      console.log('[MapRenderer] Panel already exists for', locationId, '- resetting timer');
       const panelData = this.searchPanels.get(locationId);
       
       // Clear old timer
@@ -559,38 +677,26 @@ class MapRenderer {
       
       // Set new timer
       const newTimer = setTimeout(() => {
-        console.log('[MapRenderer] Auto-hiding panel for', locationId, 'after', duration / 1000, 'seconds');
         this.removePanelById(locationId);
       }, duration);
       
       panelData.timer = newTimer;
-      console.log('[MapRenderer] Timer reset for existing panel with', duration / 1000, 's duration');
       return;
     }
-    
-    console.log('[MapRenderer] Looking for node:', locationId);
-    console.log('[MapRenderer] Available nodes:', Array.from(this.nodes.keys()));
     
     const node = this.nodes.get(locationId);
     if (!node) {
       console.warn('[MapRenderer] Node not found for panel:', locationId);
-      console.warn('[MapRenderer] Available nodes count:', this.nodes.size);
       return;
     }
     
-    console.log('[MapRenderer] Found node:', node);
-    
     const pos = this.worldToScreen(node.x, node.y);
-    console.log('[MapRenderer] Screen position:', pos);
     
     // Create panel element
     const panel = document.createElement('div');
     panel.className = `search-result-panel ${type === 'battery_station' ? 'battery-station' : 'order'}`;
     panel.style.left = `${pos.x}px`;
     panel.style.top = `${pos.y}px`;
-    
-    console.log('[MapRenderer] Panel element created with class:', panel.className);
-    console.log('[MapRenderer] Panel position:', panel.style.left, panel.style.top);
     
     // Build panel content
     let content = '';
@@ -600,7 +706,6 @@ class MapRenderer {
       content = `
         <div class="panel-header">🔋 ${data.name || node.name}</div>
       `;
-      console.log('[MapRenderer] Battery station panel content created');
     } else if (type === 'order') {
       // Order panel - show location name, dish name, fee, deadline
       const locationName = node.name; // 地点名称
@@ -628,37 +733,21 @@ class MapRenderer {
           </div>
         </div>
       `;
-      console.log('[MapRenderer] Order panel content created');
-      console.log('[MapRenderer] Location name:', locationName);
-      console.log('[MapRenderer] Dish name:', dishName);
-      console.log('[MapRenderer] Delivery fee (formatted):', deliveryFee);
     }
     
     panel.innerHTML = content;
-    console.log('[MapRenderer] Panel innerHTML set');
-    
-    console.log('[MapRenderer] Container element:', this.container);
-    console.log('[MapRenderer] Container children before append:', this.container.children.length);
-    
     this.container.appendChild(panel);
-    console.log('[MapRenderer] Panel appended to container');
-    console.log('[MapRenderer] Container children after append:', this.container.children.length);
     
     // Use custom duration or default
     const duration = autoHideDuration || this.panelAutoHideDuration;
     
     // Set up auto-hide timer
     const timer = setTimeout(() => {
-      console.log('[MapRenderer] Auto-hiding panel for', locationId, 'after', duration / 1000, 'seconds');
       this.removePanelById(locationId);
     }, duration);
     
     // Track the panel with its timer
     this.searchPanels.set(locationId, { panel, timer });
-    console.log('[MapRenderer] Panel tracked in searchPanels map with', duration / 1000, 's auto-hide timer');
-    console.log('[MapRenderer] New panels count:', this.searchPanels.size);
-    
-    console.log('[MapRenderer] ✅ Successfully created search result panel for', locationId, type);
   }
   
   /**
@@ -679,7 +768,6 @@ class MapRenderer {
       
       // Remove from tracking
       this.searchPanels.delete(locationId);
-      console.log('[MapRenderer] Removed panel for', locationId);
     }
   }
   
@@ -687,7 +775,7 @@ class MapRenderer {
    * Clear all search result panels
    */
   clearSearchPanels() {
-    this.searchPanels.forEach((panelData, locationId) => {
+    this.searchPanels.forEach((panelData) => {
       // Clear the timer
       if (panelData.timer) {
         clearTimeout(panelData.timer);
@@ -699,7 +787,257 @@ class MapRenderer {
       }
     });
     this.searchPanels.clear();
-    console.log('[MapRenderer] Cleared all search result panels');
+  }
+  
+  /**
+   * Show location info panel at target location (right-top corner with blue border)
+   * Multiple panels at same location will stack vertically
+   * @param {string} locationId - The location ID
+   * @param {object} data - Location data (name, type, position)
+   */
+  showLocationInfoPanel(locationId, data) {
+    const node = this.nodes.get(locationId);
+    if (!node) {
+      console.warn('[MapRenderer] Node not found for location info panel:', locationId);
+      return;
+    }
+    
+    const pos = this.worldToScreen(node.x, node.y);
+    
+    // Count existing panels at this location to calculate vertical offset
+    let panelsAtLocation = 0;
+    this.locationInfoPanels.forEach((panelData, id) => {
+      if (id.startsWith(locationId + '_')) {
+        panelsAtLocation++;
+      }
+    });
+    
+    // Generate unique panel ID with index
+    const panelId = `${locationId}_${Date.now()}_${panelsAtLocation}`;
+    const verticalOffset = panelsAtLocation * 100; // 100px spacing between panels
+    
+    // Create panel element
+    const panel = document.createElement('div');
+    panel.className = 'location-info-panel';
+    panel.style.left = `${pos.x}px`;
+    panel.style.top = `${pos.y}px`;
+    panel.style.transform = `translate(10px, calc(-100% - ${verticalOffset}px))`; // Stack vertically
+    
+    // Build panel content
+    const content = `
+      <div class="panel-header">📍 ${data.name}</div>
+      <div class="panel-content">
+        <div class="panel-row">
+          <span class="panel-label">类型:</span>
+          <span class="panel-value">${data.type}</span>
+        </div>
+        <div class="panel-row">
+          <span class="panel-label">坐标:</span>
+          <span class="panel-value">(${data.position.x.toFixed(2)}, ${data.position.y.toFixed(2)})</span>
+        </div>
+      </div>
+    `;
+    
+    panel.innerHTML = content;
+    this.container.appendChild(panel);
+    
+    // Set up auto-hide timer
+    const timer = setTimeout(() => {
+      this.removeLocationInfoPanel(panelId);
+    }, this.panelAutoHideDuration);
+    
+    // Track the panel with its timer
+    this.locationInfoPanels.set(panelId, { panel, timer, locationId });
+  }
+  
+  /**
+   * Remove a location info panel by location ID
+   */
+  removeLocationInfoPanel(locationId) {
+    const panelData = this.locationInfoPanels.get(locationId);
+    if (panelData) {
+      // Clear the timer
+      if (panelData.timer) {
+        clearTimeout(panelData.timer);
+      }
+      
+      // Remove the panel element
+      if (panelData.panel && panelData.panel.parentNode) {
+        panelData.panel.parentNode.removeChild(panelData.panel);
+      }
+      
+      // Remove from tracking
+      this.locationInfoPanels.delete(locationId);
+    }
+  }
+  
+  /**
+   * Show path animation from start to end with colored line
+   * @param {string[]} path - Array of location IDs representing the path
+   * @param {string} color - Line color ('green', 'yellow', or 'blue')
+   * @param {object} data - Data to show in panel (distance, time, etc.)
+   */
+  showPathAnimation(path, color, data) {
+    if (!path || path.length < 2) {
+      console.warn('[MapRenderer] Invalid path for animation');
+      return;
+    }
+    
+    // Get or create SVG for path lines
+    let svg = this.container.querySelector('svg.path-animation-svg');
+    if (!svg) {
+      svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.classList.add('path-animation-svg');
+      svg.style.position = 'absolute';
+      svg.style.top = '0';
+      svg.style.left = '0';
+      svg.style.width = '100%';
+      svg.style.height = '100%';
+      svg.style.pointerEvents = 'none';
+      svg.style.zIndex = '5';
+      this.container.appendChild(svg);
+    }
+    
+    // Determine line color
+    let lineColor;
+    if (color === 'green') {
+      lineColor = '#22c55e';
+    } else if (color === 'blue') {
+      lineColor = '#3b82f6';
+    } else {
+      lineColor = '#f59e0b'; // yellow
+    }
+    
+    // Create path segments
+    const lines = [];
+    let totalLength = 0;
+    
+    for (let i = 0; i < path.length - 1; i++) {
+      const fromNode = this.nodes.get(path[i]);
+      const toNode = this.nodes.get(path[i + 1]);
+      
+      if (!fromNode || !toNode) {
+        console.warn('[MapRenderer] Node not found in path:', path[i], path[i + 1]);
+        continue;
+      }
+      
+      const from = this.worldToScreen(fromNode.x, fromNode.y);
+      const to = this.worldToScreen(toNode.x, toNode.y);
+      
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', from.x);
+      line.setAttribute('y1', from.y);
+      line.setAttribute('x2', to.x);
+      line.setAttribute('y2', to.y);
+      line.setAttribute('stroke', lineColor);
+      line.setAttribute('stroke-width', '4');
+      line.setAttribute('stroke-linecap', 'round');
+      
+      // Calculate line length for animation
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      totalLength += length;
+      
+      // Set up dash animation
+      line.style.strokeDasharray = length;
+      line.style.strokeDashoffset = length;
+      
+      svg.appendChild(line);
+      lines.push({ element: line, length });
+    }
+    
+    // Animate lines sequentially
+    let currentDelay = 0;
+    const segmentDuration = 400; // ms per segment
+    
+    lines.forEach((lineData, index) => {
+      setTimeout(() => {
+        lineData.element.style.transition = `stroke-dashoffset ${segmentDuration}ms linear`;
+        lineData.element.style.strokeDashoffset = '0';
+      }, currentDelay);
+      
+      currentDelay += segmentDuration;
+    });
+    
+    // Show panel at the end location after animation completes
+    const endLocationId = path[path.length - 1];
+    const endNode = this.nodes.get(endLocationId);
+    
+    if (endNode) {
+      setTimeout(() => {
+        const pos = this.worldToScreen(endNode.x, endNode.y);
+        
+        // Create panel element
+        const panel = document.createElement('div');
+        panel.className = `path-result-panel ${color}`;
+        panel.style.left = `${pos.x}px`;
+        panel.style.top = `${pos.y}px`;
+        panel.style.transform = 'translate(10px, -100%)'; // Right-top of end location
+        
+        // Build panel content
+        let content = '<div class="panel-header">';
+        if (color === 'green') {
+          content += '📏 距离信息';
+        } else if (color === 'blue') {
+          content += '⏱️ 时间估算';
+        } else {
+          content += '⏱️ 时间估算'; // yellow - fallback
+        }
+        content += '</div><div class="panel-content">';
+        
+        if (data.distance) {
+          content += `
+            <div class="panel-row">
+              <span class="panel-label">距离:</span>
+              <span class="panel-value">${data.distance}</span>
+            </div>
+          `;
+        }
+        
+        if (data.time) {
+          content += `
+            <div class="panel-row">
+              <span class="panel-label">时间:</span>
+              <span class="panel-value">${data.time}</span>
+            </div>
+          `;
+        }
+        
+        content += '</div>';
+        panel.innerHTML = content;
+        
+        this.container.appendChild(panel);
+        
+        // Set up auto-hide timer
+        const timer = setTimeout(() => {
+          // Remove panel
+          if (panel && panel.parentNode) {
+            panel.parentNode.removeChild(panel);
+          }
+          
+          // Remove lines
+          lines.forEach(lineData => {
+            if (lineData.element && lineData.element.parentNode) {
+              lineData.element.parentNode.removeChild(lineData.element);
+            }
+          });
+          
+          // Remove from tracking
+          const index = this.pathAnimations.findIndex(anim => anim.panel === panel);
+          if (index !== -1) {
+            this.pathAnimations.splice(index, 1);
+          }
+        }, this.panelAutoHideDuration);
+        
+        // Track the animation
+        this.pathAnimations.push({
+          lines: lines.map(l => l.element),
+          panel,
+          timer
+        });
+      }, currentDelay);
+    }
   }
   
   /**
@@ -716,19 +1054,20 @@ class MapRenderer {
    * Private method called by scheduleRender
    */
   performRender() {
-    console.log('[MapRenderer] Performing render with', this.nodes.size, 'nodes');
-    
     // 如果正在动画中，不要清除容器（保留 agent 元素和面板）
     if (!this.isAnimating) {
       // 不能直接清空 innerHTML，因为会删除面板
       // 只删除非面板、非 agent 的元素
       const elementsToRemove = [];
       Array.from(this.container.children).forEach(child => {
-        // 保留面板和 agent 元素
+        // 保留面板、agent 元素和动画元素
         if (!child.classList.contains('search-result-panel') && 
             !child.classList.contains('agent-marker') &&
             !child.classList.contains('sonar-wave') &&
-            !child.classList.contains('action-panel')) {
+            !child.classList.contains('action-panel') &&
+            !child.classList.contains('critical-hit-animation') &&
+            !child.classList.contains('location-info-panel') &&
+            !child.classList.contains('path-result-panel')) {
           elementsToRemove.push(child);
         }
       });
@@ -752,7 +1091,6 @@ class MapRenderer {
       svg.style.pointerEvents = 'none';
       svg.style.zIndex = '1';
       this.container.appendChild(svg);
-      console.log('[MapRenderer] SVG created and appended');
     } else {
       // 清空现有的边
       svg.innerHTML = '';
@@ -780,7 +1118,6 @@ class MapRenderer {
     
     // Render nodes (如果不在动画中，或者没有现有节点)
     if (!this.isAnimating) {
-      let nodeCount = 0;
       this.nodes.forEach(node => {
         const screen = this.worldToScreen(node.x, node.y);
         
@@ -801,10 +1138,7 @@ class MapRenderer {
         nodeElement.appendChild(emoji);
         
         this.container.appendChild(nodeElement);
-        nodeCount++;
       });
-      
-      console.log('[MapRenderer] Rendered', nodeCount, 'nodes');
     }
     
     // Render or update agent marker
@@ -825,7 +1159,6 @@ class MapRenderer {
           this.agentElement.style.zIndex = '100';
           this.agentElement.textContent = '🛵';
           this.container.appendChild(this.agentElement);
-          console.log('[MapRenderer] Created agent element at', this.agentPosition);
         } else if (!this.isAnimating) {
           // 如果不在动画中，更新位置
           this.agentElement.style.left = `${screen.x}px`;
