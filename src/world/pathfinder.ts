@@ -202,6 +202,7 @@ export class Pathfinder {
         congestion: CongestionManager.getCongestionLevelName(avgCongestion),
         speed: avgSpeed,
         time: segmentTime,
+        path: pathResult.path,  // 包含详细路径
       });
 
       totalTime += segmentTime;

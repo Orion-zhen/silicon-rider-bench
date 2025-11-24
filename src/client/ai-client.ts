@@ -293,6 +293,18 @@ export class AIClient {
 
         const message = choice.message;
 
+        // 检查是否有思考内容（reasoning models like o1）
+        // OpenAI API 可能在不同字段返回思考内容
+        const reasoningContent = (message as any).reasoning_content || 
+                                (message as any).reasoning || 
+                                (choice as any).reasoning_content;
+        
+        // 如果有思考内容，发送到 Web 客户端
+        if (this.webVisualization && reasoningContent) {
+          console.log('[AI Client] Reasoning content detected:', reasoningContent);
+          this.webVisualization.sendReasoning(reasoningContent);
+        }
+
         // 添加助手消息到历史（包含 tool_calls 如果有的话）
         const assistantMessage: any = {
           role: 'assistant',

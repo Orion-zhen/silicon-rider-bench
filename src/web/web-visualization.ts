@@ -255,6 +255,24 @@ export class WebVisualization {
   }
 
   /**
+   * 发送推理/思考内容
+   * 在思考模型返回推理过程时调用
+   * 
+   * @param content 推理内容
+   */
+  sendReasoning(content: string): void {
+    const message = {
+      type: 'reasoning' as const,
+      timestamp: Date.now(),
+      data: {
+        content,
+      },
+    };
+
+    this.webServer.broadcast(message);
+  }
+
+  /**
    * 发送工具调用信息
    * 在 AI 调用工具时调用
    * 

@@ -333,6 +333,11 @@ class Application {
       this.handleConversation(message.data);
     });
 
+    // Handle reasoning messages (from thinking models)
+    this.connectionManager.on('reasoning', (message) => {
+      this.handleReasoning(message.data);
+    });
+
     // Handle tool calls
     this.connectionManager.on('tool_call', (message) => {
       this.handleToolCall(message.data);
@@ -434,6 +439,30 @@ class Application {
     
     if (this.chatPanel) {
       this.chatPanel.addMessage(data.role, data.content);
+    }
+  }
+
+  /**
+   * Handle reasoning message (from thinking models)
+   */
+  handleReasoning(data) {
+    console.log('[App] Reasoning content received:', data.content);
+    
+    // Show reasoning panel
+    if (data.content && this.mapRenderer) {
+      // Truncate long reasoning content
+      let displayContent = data.content;
+      if (displayContent.length > 150) {
+        displayContent = displayContent.substring(0, 150) + '...';
+      }
+      
+      const reasoningText = `${this.modelName} 💭: ${displayContent}`;
+      this.mapRenderer.showActionPanel(reasoningText, 'reasoning');
+    }
+    
+    // Also add to chat panel if available
+    if (this.chatPanel) {
+      this.chatPanel.addMessage('system', `💭 ${this.modelName} 思考过程:\n${data.content}`);
     }
   }
 
@@ -572,40 +601,58 @@ class Application {
           );
         }, 500);
         
-      } else if (data.toolName === 'estimate_time' && resultData && resultData.segments) {
-        // Show path animation with blue color (non-blocking, with 0.5s delay)
-        setTimeout(() => {
-          // Extract path from segments
-          const path = [];
-          let totalDistance = 0;
-          
-          if (resultData.segments && resultData.segments.length > 0) {
-            // Add first node
-            path.push(resultData.segments[0].from);
+      } else if (data.toolName === 'estimate_time' && resultData) {
+        console.log('[App] 🔵 estimate_time result data:', resultData);
+        console.log('[App] Has segments:', !!resultData.segments);
+        
+        if (resultData.segments) {
+          // Show path animation with blue color (non-blocking, with 0.5s delay)
+          setTimeout(() => {
+            // Extract complete path from segments
+            const path = [];
+            let totalDistance = 0;
             
-            // Add all 'to' nodes and calculate total distance
-            resultData.segments.forEach(segment => {
-              path.push(segment.to);
-              totalDistance += segment.distance || 0;
-            });
-          }
-          
-          // Safely extract time with default
-          const totalTime = typeof resultData.totalTime === 'number' ? resultData.totalTime : 0;
-          
-          console.log('[App] estimate_time path:', path, 'distance:', totalDistance, 'time:', totalTime);
-          
-          if (path.length >= 2) {
-            this.mapRenderer.showPathAnimation(
-              path,
-              'blue',
-              {
-                time: totalTime.toFixed(2) + ' 分钟',
-                distance: totalDistance.toFixed(2) + ' km'
-              }
-            );
-          }
-        }, 500);
+            if (resultData.segments && resultData.segments.length > 0) {
+              // Merge all segment paths into one complete path
+              resultData.segments.forEach((segment, index) => {
+                if (segment.path && segment.path.length > 0) {
+                  if (index === 0) {
+                    // First segment: add all nodes
+                    path.push(...segment.path);
+                  } else {
+                    // Subsequent segments: skip first node (already added as last node of previous segment)
+                    path.push(...segment.path.slice(1));
+                  }
+                }
+                totalDistance += segment.distance || 0;
+              });
+            }
+            
+            // Safely extract time with default
+            const totalTime = typeof resultData.totalTime === 'number' ? resultData.totalTime : 0;
+            
+            console.log('[App] 🔵 estimate_time extracted path:', path);
+            console.log('[App] 🔵 Path length:', path.length);
+            console.log('[App] 🔵 Total distance:', totalDistance, 'km');
+            console.log('[App] 🔵 Total time:', totalTime, 'min');
+            
+            if (path.length >= 2) {
+              console.log('[App] 🔵 Calling showPathAnimation with blue color');
+              this.mapRenderer.showPathAnimation(
+                path,
+                'blue',
+                {
+                  time: totalTime.toFixed(2) + ' 分钟',
+                  distance: totalDistance.toFixed(2) + ' km'
+                }
+              );
+            } else {
+              console.warn('[App] ⚠️  Path too short, not showing animation. Path:', path);
+            }
+          }, 500);
+        } else {
+          console.warn('[App] ⚠️  estimate_time result has no segments');
+        }
       }
     }
     

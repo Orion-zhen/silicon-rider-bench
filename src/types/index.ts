@@ -257,6 +257,7 @@ export interface EstimateTimeResponse {
     congestion: string;
     speed: number;
     time: number;
+    path: string[];  // 详细路径节点列表
   }>;
 }
 

@@ -1009,7 +1009,7 @@ class MapRenderer {
         
         this.container.appendChild(panel);
         
-        // Set up auto-hide timer
+        // Set up auto-hide timer (1.5 seconds after animation completes)
         const timer = setTimeout(() => {
           // Remove panel
           if (panel && panel.parentNode) {
@@ -1028,7 +1028,7 @@ class MapRenderer {
           if (index !== -1) {
             this.pathAnimations.splice(index, 1);
           }
-        }, this.panelAutoHideDuration);
+        }, 1500); // 1.5 seconds
         
         // Track the animation
         this.pathAnimations.push({
@@ -1061,13 +1061,15 @@ class MapRenderer {
       const elementsToRemove = [];
       Array.from(this.container.children).forEach(child => {
         // 保留面板、agent 元素和动画元素
+        // 特别注意：保留 path-animation-svg（路径动画）
         if (!child.classList.contains('search-result-panel') && 
             !child.classList.contains('agent-marker') &&
             !child.classList.contains('sonar-wave') &&
             !child.classList.contains('action-panel') &&
             !child.classList.contains('critical-hit-animation') &&
             !child.classList.contains('location-info-panel') &&
-            !child.classList.contains('path-result-panel')) {
+            !child.classList.contains('path-result-panel') &&
+            !child.classList.contains('path-animation-svg')) {
           elementsToRemove.push(child);
         }
       });
@@ -1080,9 +1082,10 @@ class MapRenderer {
     }
     
     // Create SVG for edges (如果不存在)
-    let svg = this.container.querySelector('svg');
+    let svg = this.container.querySelector('svg.map-edges-svg');
     if (!svg) {
       svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.classList.add('map-edges-svg');
       svg.style.position = 'absolute';
       svg.style.top = '0';
       svg.style.left = '0';

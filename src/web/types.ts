@@ -16,6 +16,7 @@ export type MessageType =
   | 'init'           // 初始化数据
   | 'state_update'   // 状态更新
   | 'conversation'   // 对话消息
+  | 'reasoning'      // 推理/思考内容
   | 'tool_call'      // 工具调用
   | 'tool_result'    // 工具结果
   | 'simulation_end' // 模拟结束

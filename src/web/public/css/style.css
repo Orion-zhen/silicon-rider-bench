@@ -384,6 +384,15 @@ body {
     z-index: 120;
 }
 
+.action-panel.reasoning {
+    border: 2px solid #8b5cf6;
+    background-color: #f5f3ff;
+    min-width: 270px;
+    max-width: 525px;
+    padding: calc(var(--spacing-sm) * 1.5) calc(var(--spacing-md) * 1.5);
+    z-index: 125;
+}
+
 .action-panel-content {
     font-size: 0.8rem;
     color: var(--text-primary);
@@ -396,6 +405,14 @@ body {
     color: #1f2937;
     line-height: 1.6;
     font-weight: 500;
+}
+
+.action-panel.reasoning .action-panel-content {
+    font-size: 1.1rem;
+    color: #5b21b6;
+    line-height: 1.6;
+    font-weight: 500;
+    font-style: italic;
 }
 
 .tool-action-badge {
