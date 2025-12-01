@@ -276,10 +276,12 @@ class Application {
     this.pendingSonarToolName = null;
     this.pendingPanelData = [];
     this.modelName = 'AI';
+    this.totalToolCalls = 0; // Cumulative tool call counter
     
     // Tool name to Chinese mapping
     this.toolNameMap = {
       'get_my_status': '查询状态',
+      'get_map': '获取地图',
       'search_nearby_orders': '搜索订单',
       'search_nearby_battery_stations': '搜索换电站',
       'accept_order': '接受订单',
@@ -471,6 +473,15 @@ class Application {
    */
   handleToolCall(data) {
     console.log('[App] handleToolCall called:', data.toolName, 'mapRenderer exists:', !!this.mapRenderer);
+    
+    // Increment tool call counter (note: one message may contain multiple tool calls)
+    // Each call to handleToolCall represents one tool call
+    this.totalToolCalls++;
+    
+    // Update stats panel with new tool call count
+    if (this.statsPanel) {
+      this.statsPanel.updateToolCalls(this.totalToolCalls);
+    }
     
     // Show action panel for tool call
     if (this.mapRenderer) {

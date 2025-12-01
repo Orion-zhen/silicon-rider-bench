@@ -11,6 +11,7 @@ export interface CLIArgs {
   level: LevelName;
   seed?: number;
   modelName?: string;
+  baseURL?: string;
   noVisualization?: boolean;
   outputFile?: string;
   help?: boolean;
@@ -57,6 +58,11 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CLIArgs {
       case '--model':
       case '-m':
         parsed.modelName = args[++i];
+        break;
+
+      case '--base-url':
+      case '--baseurl':
+        parsed.baseURL = args[++i];
         break;
 
       case '--no-viz':

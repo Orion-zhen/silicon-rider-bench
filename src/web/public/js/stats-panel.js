@@ -16,6 +16,7 @@ class StatsPanel {
       turn: null,
       tokensLast: null,
       tokensTotal: null,
+      toolCalls: null,
       battery: null,
       profit: null,
       carried: null,
@@ -77,6 +78,10 @@ class StatsPanel {
         <h3>Agent Status</h3>
         <div class="stat-content">
           <div class="stat-item">
+            <span class="stat-label">Tool Calls:</span>
+            <span class="stat-value" id="stat-tool-calls">0</span>
+          </div>
+          <div class="stat-item">
             <span class="stat-label">Battery:</span>
             <span class="stat-value" id="stat-battery">--%</span>
           </div>
@@ -116,6 +121,7 @@ class StatsPanel {
       turn: document.getElementById('stat-turn'),
       tokensLast: document.getElementById('stat-tokens-last'),
       tokensTotal: document.getElementById('stat-tokens-total'),
+      toolCalls: document.getElementById('stat-tool-calls'),
       battery: document.getElementById('stat-battery'),
       profit: document.getElementById('stat-profit'),
       carried: document.getElementById('stat-carried'),
@@ -136,6 +142,18 @@ class StatsPanel {
     if (this.elements.model) {
       this.elements.model.textContent = modelName || 'Unknown';
       this.elements.model.title = modelName; // Add tooltip for long names
+    }
+  }
+
+  /**
+   * Update tool calls count (called when tool_call message is received)
+   * @param {number} count - Total tool call count
+   */
+  updateToolCalls(count) {
+    if (this.elements.toolCalls && count !== this.previousValues.toolCalls) {
+      const oldValue = this.previousValues.toolCalls || 0;
+      this.animateNumberChange(this.elements.toolCalls, oldValue, count, 0);
+      this.previousValues.toolCalls = count;
     }
   }
 

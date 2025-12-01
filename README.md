@@ -23,7 +23,7 @@ Silicon Rider Bench 模拟外卖骑手的工作流程，AI 智能体通过调用
 
 - Node.js ≥ 18.0.0
 - TypeScript ≥ 5.0.0
-- OpenRouter API Key（或兼容 OpenAI SDK 的 API）
+- OpenRouter API Key（或兼容 OpenAI SDK 的 API，或本地 llama.cpp 服务）
 
 ### 安装步骤
 
@@ -44,6 +44,8 @@ cp .env.example .env
 
 编辑 `.env` 文件：
 
+**使用 OpenRouter / OpenAI：**
+
 ```bash
 # API Key（必需）- 支持 OpenRouter、OpenAI 等兼容服务
 API_KEY=your_api_key_here
@@ -57,6 +59,28 @@ BASE_URL=https://openrouter.ai/api/v1
 # 最大迭代次数（可选，默认：300）
 # AI 模型的最大对话轮数，Level 1 可能需要 100-300 次迭代
 MAX_ITERATIONS=300
+```
+
+**使用 llama.cpp 或其他无需 API Key 的服务：**
+
+```bash
+# API Key 是可选的，留空即可
+API_KEY=
+
+# API Base URL - 支持本地或远程服务
+BASE_URL=http://localhost:8080/v1
+# 或远程地址，例如：
+# BASE_URL=http://10.0.6.26:9999/api/v1
+
+# 模型名称（可以任意填写）
+MODEL_NAME=llama-local
+
+# 最大迭代次数
+MAX_ITERATIONS=300
+```
+
+> **注意**：API_KEY 现在是可选的。如果留空，系统会使用占位符，由上游 API 决定是否需要认证。
+> 详细配置说明请参考 [DOCUMENTS/llamacpp-configuration.md](DOCUMENTS/llamacpp-configuration.md)
 
 # 站点 URL（可选，用于 OpenRouter 排名）
 SITE_URL=

@@ -13,8 +13,10 @@ import {
   GetLocationInfoResponse,
   CalculateDistanceResponse,
   EstimateTimeResponse,
+  GetMapResponse,
   Node,
   Order,
+  NodeType,
 } from '../types';
 import { AgentState } from '../core/agent-state';
 import { OrderGenerator } from '../core/order-generator';
@@ -240,7 +242,7 @@ export const searchNearbyBatteryStationsTool: ToolDefinition = {
  */
 export const getLocationInfoTool: ToolDefinition = {
   name: 'get_location_info',
-  description: '获取指定位置的详细信息',
+  description: '获取指定位置的详细信息，包括相邻的位置和距离',
   parameters: {
     locationId: {
       type: 'string',
@@ -249,7 +251,7 @@ export const getLocationInfoTool: ToolDefinition = {
     },
   },
   handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<GetLocationInfoResponse>> => {
-    const { nodes } = context;
+    const { nodes, simulator } = context;
     const locationId = params.locationId as string;
 
     // 检查位置是否存在
@@ -265,11 +267,49 @@ export const getLocationInfoTool: ToolDefinition = {
       };
     }
 
+    // Build neighbors list from edges
+    const neighbors: GetLocationInfoResponse['neighbors'] = [];
+    
+    if (simulator) {
+      const edges = simulator.getEdges();
+      
+      for (const edge of edges) {
+        let neighborId: string | null = null;
+        
+        // Check if this edge connects to the target location
+        if (edge.from === locationId) {
+          neighborId = edge.to;
+        } else if (edge.to === locationId) {
+          neighborId = edge.from;
+        }
+        
+        if (neighborId) {
+          const neighborNode = nodes.get(neighborId);
+          if (neighborNode) {
+            neighbors.push({
+              id: neighborId,
+              name: neighborNode.name,
+              type: neighborNode.type,
+              distance: `${edge.distance.toFixed(2)}km`,
+            });
+          }
+        }
+      }
+      
+      // Sort by distance
+      neighbors.sort((a, b) => {
+        const distA = parseFloat(a.distance);
+        const distB = parseFloat(b.distance);
+        return distA - distB;
+      });
+    }
+
     const response: GetLocationInfoResponse = {
       id: node.id,
       type: node.type,
       name: node.name,
       position: { ...node.position },
+      neighbors,
     };
 
     return {
@@ -454,6 +494,101 @@ export const helpTool: ToolDefinition = {
 };
 
 /**
+ * 获取地图信息
+ * 返回完整地图数据，包括按类型分组的位置列表和邻接表
+ */
+export const getMapTool: ToolDefinition = {
+  name: 'get_map',
+  description: '获取完整地图信息，包括所有位置（按类型分组）和连接关系（邻接表）',
+  parameters: {},
+  handler: async (_params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<GetMapResponse>> => {
+    const { nodes, simulator } = context;
+    
+    if (!simulator) {
+      return {
+        success: false,
+        error: {
+          code: 'INVALID_PARAMETER',
+          message: 'Simulator not available in context',
+          details: {},
+        },
+      };
+    }
+    
+    // Get edges from simulator
+    const edges = simulator.getEdges();
+    
+    // Build locations by type
+    const locationsByType: GetMapResponse['locationsByType'] = {
+      restaurant: [],
+      supermarket: [],
+      pharmacy: [],
+      residential: [],
+      office: [],
+      battery_swap: [],
+    };
+    
+    // Group nodes by type
+    for (const node of nodes.values()) {
+      const label = `${node.id}(${node.name})`;
+      const nodeType = node.type as NodeType;
+      if (locationsByType[nodeType]) {
+        locationsByType[nodeType].push(label);
+      }
+    }
+    
+    // Build adjacency list (connections)
+    const connections: GetMapResponse['connections'] = {};
+    
+    // Initialize empty arrays for all nodes
+    for (const node of nodes.values()) {
+      connections[node.id] = [];
+    }
+    
+    // Add edges (bidirectional)
+    for (const edge of edges) {
+      const fromNode = nodes.get(edge.from);
+      const toNode = nodes.get(edge.to);
+      
+      if (fromNode && toNode) {
+        // Add forward direction
+        connections[edge.from].push({
+          to: edge.to,
+          name: toNode.name,
+          type: toNode.type,
+          distance: `${edge.distance.toFixed(2)}km`,
+        });
+        
+        // Add reverse direction (bidirectional roads)
+        connections[edge.to].push({
+          to: edge.from,
+          name: fromNode.name,
+          type: fromNode.type,
+          distance: `${edge.distance.toFixed(2)}km`,
+        });
+      }
+    }
+    
+    // Sort connections by distance for each node
+    for (const nodeId of Object.keys(connections)) {
+      connections[nodeId].sort((a, b) => {
+        const distA = parseFloat(a.distance);
+        const distB = parseFloat(b.distance);
+        return distA - distB;
+      });
+    }
+    
+    return {
+      success: true,
+      data: {
+        locationsByType,
+        connections,
+      },
+    };
+  },
+};
+
+/**
  * 获取所有查询工具
  */
 export function getQueryTools(): ToolDefinition[] {
@@ -465,5 +600,6 @@ export function getQueryTools(): ToolDefinition[] {
     calculateDistanceTool,
     estimateTimeTool,
     helpTool,
+    getMapTool,
   ];
 }

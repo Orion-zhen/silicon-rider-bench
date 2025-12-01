@@ -17,11 +17,18 @@ import dotenv from 'dotenv';
 import { Simulator } from '../core/simulator';
 import { ToolCallRequest } from '../types';
 import { createToolRegistry } from '../tools';
-// import { generateSystemPrompt } from './system-prompt';
+import { generateSystemPrompt } from './system-prompt';
 import type { WebVisualization } from '../web/web-visualization.js';
 
 // 加载环境变量
 dotenv.config();
+
+/**
+ * 空内容占位符
+ * 用于兼容 llama.cpp 等服务器的聊天模板，它们可能无法处理空字符串或 null content
+ * 如果空格不起作用，可以尝试其他值如 " " 或 "[empty]" 等
+ */
+const EMPTY_CONTENT_PLACEHOLDER = ' ';
 
 /**
  * AI 客户端配置
@@ -34,6 +41,9 @@ export interface AIClientConfig {
   appName?: string;
   maxIterations?: number;
   temperature?: number;
+  topP?: number;                // Top-P (nucleus sampling)
+  repetitionPenalty?: number;   // Repetition penalty (frequency_penalty in OpenAI API)
+  contextHistoryLimit?: number; // 限制传递给服务器的历史消息数量（不包含 system 消息），不设置或 0 表示不限制
 }
 
 /**
@@ -120,9 +130,22 @@ export class AIClient {
    * @returns 完整配置
    */
   private loadConfig(config?: Partial<AIClientConfig>): AIClientConfig {
-    const apiKey = config?.apiKey || process.env.API_KEY;
-    if (!apiKey) {
-      throw new Error('API_KEY is required. Please set it in .env file.');
+    // 获取 baseURL
+    const baseURL = config?.baseURL || process.env.BASE_URL || 'https://openrouter.ai/api/v1';
+    
+    // 获取 API Key（现在是可选的）
+    let apiKey = config?.apiKey || process.env.API_KEY;
+    
+    // 去除空白字符，将空字符串视为未设置
+    if (apiKey) {
+      apiKey = apiKey.trim();
+    }
+    
+    // 如果没有提供 API Key，使用占位符
+    // 让上游 API 自己决定是否需要验证
+    if (!apiKey || apiKey === '') {
+      apiKey = 'sk-no-key-required';
+      console.log('⚠ API_KEY not set. If the upstream API requires authentication, it will return an error.');
     }
 
     // 解析最大迭代次数，支持从环境变量读取
@@ -130,14 +153,36 @@ export class AIClient {
       ? parseInt(process.env.MAX_ITERATIONS, 10) 
       : undefined;
 
+    // 解析上下文历史限制，支持从环境变量读取
+    // 0 或不设置表示不限制
+    const contextHistoryLimitFromEnv = process.env.CONTEXT_HISTORY_LIMIT 
+      ? parseInt(process.env.CONTEXT_HISTORY_LIMIT, 10) 
+      : undefined;
+
+    // 解析采样参数，支持从环境变量读取
+    const temperatureFromEnv = process.env.TEMPERATURE 
+      ? parseFloat(process.env.TEMPERATURE) 
+      : undefined;
+    
+    const topPFromEnv = process.env.TOP_P 
+      ? parseFloat(process.env.TOP_P) 
+      : undefined;
+    
+    const repetitionPenaltyFromEnv = process.env.REPETITION_PENALTY 
+      ? parseFloat(process.env.REPETITION_PENALTY) 
+      : undefined;
+
     return {
       apiKey,
       modelName: config?.modelName || process.env.MODEL_NAME || 'anthropic/claude-3.5-sonnet',
-      baseURL: config?.baseURL || process.env.BASE_URL || 'https://openrouter.ai/api/v1',
+      baseURL,
       siteURL: config?.siteURL || process.env.SITE_URL,
       appName: config?.appName || process.env.APP_NAME || 'Silicon Rider Bench',
       maxIterations: config?.maxIterations || maxIterationsFromEnv || 300,
-      temperature: config?.temperature || 0.7,
+      temperature: config?.temperature ?? temperatureFromEnv ?? 1.0,
+      topP: config?.topP ?? topPFromEnv ?? 0.95,
+      repetitionPenalty: config?.repetitionPenalty ?? repetitionPenaltyFromEnv ?? 1.05,
+      contextHistoryLimit: config?.contextHistoryLimit || contextHistoryLimitFromEnv,
     };
   }
 
@@ -198,13 +243,67 @@ export class AIClient {
       iteration++;
 
       try {
+        // 更新 system prompt 中的当前轮次信息
+        if (this.conversationHistory.length > 0 && this.conversationHistory[0].role === 'system') {
+          this.conversationHistory[0].content = generateSystemPrompt(this.simulator, iteration);
+        }
+
+        // 根据配置限制历史消息数量
+        // 保留 system 消息（通常是第一条），只限制非 system 消息
+        let messagesToSend = this.conversationHistory;
+        const historyLimit = this.config.contextHistoryLimit;
+        
+        if (historyLimit && historyLimit > 0) {
+          // 分离 system 消息和非 system 消息
+          const systemMessages = this.conversationHistory.filter(msg => msg.role === 'system');
+          const nonSystemMessages = this.conversationHistory.filter(msg => msg.role !== 'system');
+          
+          // 只有当非 system 消息数量 > historyLimit 时才进行截取
+          if (nonSystemMessages.length > historyLimit) {
+            // 保留最近的 historyLimit 条非 system 消息
+            const recentMessages = nonSystemMessages.slice(-historyLimit);
+            // 合并 system 消息和最近的非 system 消息
+            messagesToSend = [...systemMessages, ...recentMessages];
+          }
+        }
+
+        // 清理消息，确保所有 content 都是字符串而不是 null/undefined/空字符串
+        // 这是为了兼容 llama.cpp 等服务器的聊天模板，它们可能无法处理 null 或空 content
+        // 注意：使用 EMPTY_CONTENT_PLACEHOLDER 替换空内容
+        const sanitizedMessages = messagesToSend.map(msg => {
+          // 处理 content：null/undefined/空字符串 都替换为占位符
+          let content = msg.content;
+          if (content === null || content === undefined || content === '') {
+            content = EMPTY_CONTENT_PLACEHOLDER;
+          } else {
+            content = String(content);
+          }
+          
+          const sanitized: Record<string, any> = {
+            role: msg.role,
+            content,
+          };
+          // 复制其他可能存在的字段（如 tool_call_id, name, tool_calls, reasoning_content）
+          if (msg.tool_call_id) sanitized.tool_call_id = msg.tool_call_id;
+          if (msg.name) sanitized.name = msg.name;
+          if ((msg as any).tool_calls) sanitized.tool_calls = (msg as any).tool_calls;
+          if ((msg as any).reasoning_content) sanitized.reasoning_content = (msg as any).reasoning_content;
+          return sanitized;
+        });
+
         // 构建请求
-        const requestBody = {
+        const requestBody: any = {
           model: this.config.modelName,
-          messages: this.conversationHistory as any,
+          messages: sanitizedMessages as any,
           tools: this.toolDefinitions,
           tool_choice: 'auto' as const,
           temperature: this.config.temperature,
+          top_p: this.config.topP,
+          frequency_penalty: this.config.repetitionPenalty ? this.config.repetitionPenalty - 1 : undefined,
+          // Note: frequency_penalty in OpenAI API is different from repetition_penalty
+          // OpenAI frequency_penalty range: -2.0 to 2.0 (0 means no penalty)
+          // repetition_penalty range: typically 1.0+ (1.0 means no penalty)
+          // We convert by: frequency_penalty = repetition_penalty - 1
         };
 
         // Debug: 输出请求详情
@@ -305,11 +404,16 @@ export class AIClient {
           this.webVisualization.sendReasoning(reasoningContent);
         }
 
-        // 添加助手消息到历史（包含 tool_calls 如果有的话）
+        // 添加助手消息到历史（包含 tool_calls 和 reasoning_content 如果有的话）
         const assistantMessage: any = {
           role: 'assistant',
           content: message.content || '',
         };
+        
+        // 如果有思考内容，也要添加到历史中（Qwen3 等模型需要）
+        if (reasoningContent) {
+          assistantMessage.reasoning_content = reasoningContent;
+        }
         
         // 如果有工具调用，也要添加到历史中
         if (message.tool_calls && message.tool_calls.length > 0) {

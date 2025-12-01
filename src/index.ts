@@ -14,7 +14,7 @@ import { Simulator } from './core/simulator';
 import { getLevelConfig, printLevelConfig } from './levels/level-config';
 import { createAIClient, generateSystemPrompt } from './client/ai-client';
 import { TerminalDisplay } from './visualization/terminal-display';
-import { ReportGenerator } from './scoring/report-generator';
+import { ReportGenerator, ConversationEntry } from './scoring/report-generator';
 import { formatStatusDisplay, formatHeader, formatSeparator } from './utils/cli-formatter';
 import { parseArgs } from './cli/args-parser';
 import { WebServer } from './web/web-server';
@@ -43,6 +43,7 @@ Silicon Rider Bench - AI 外卖骑手基准测试
   --level, -l <level>           指定 Level（0.1 或 1）
   --seed, -s <seed>             指定地图种子（覆盖默认值）
   --model, -m <model>           指定 AI 模型名称
+  --base-url <url>              指定 API 基础 URL（用于本地 llama.cpp 等）
   --mode <mode>                 可视化模式（terminal 或 web，默认: terminal）
   --host <host>                 Web 服务器主机地址（默认: localhost）
   --port <port>                 Web 服务器端口号（默认: 3000）
@@ -53,11 +54,12 @@ Silicon Rider Bench - AI 外卖骑手基准测试
 示例:
   npm run dev -- --level 1 --seed 12345
   npm run dev -- --level 0.1 --no-viz --output report.md
+  npm run dev -- --base-url http://localhost:8080/v1 --level 0.1
 
 环境变量:
-  API_KEY                       API 密钥（必需，支持 OpenRouter、OpenAI 等）
+  API_KEY                       API 密钥（本地 API 不需要，支持 OpenRouter、OpenAI 等）
   MODEL_NAME                    AI 模型名称（可选）
-  BASE_URL                      API 基础 URL（可选）
+  BASE_URL                      API 基础 URL（可选，本地 llama.cpp 使用如 http://localhost:8080/v1）
   `.trim());
 }
 
@@ -114,8 +116,10 @@ async function main(): Promise<void> {
 
         // 初始化 AI 客户端（需要先初始化以获取模型名称）
         console.log('正在初始化 AI 客户端...');
-        const clientConfig = args.modelName ? { modelName: args.modelName } : undefined;
-        const aiClient = createAIClient(simulator, clientConfig);
+        const clientConfig: any = {};
+        if (args.modelName) clientConfig.modelName = args.modelName;
+        if (args.baseURL) clientConfig.baseURL = args.baseURL;
+        const aiClient = createAIClient(simulator, Object.keys(clientConfig).length > 0 ? clientConfig : undefined);
         const modelName = aiClient.getConfig().modelName;
         console.log('✓ AI 客户端初始化完成');
         console.log(`  模型: ${modelName}\n`);
@@ -269,17 +273,73 @@ async function main(): Promise<void> {
     const scoreCalculator = simulator.getScoreCalculator();
     const metrics = scoreCalculator.calculateMetrics();
 
+    // 获取 token 使用量
+    const tokenUsage = aiClient.getTokenUsage();
+    
+    // 获取对话历史并转换为 ConversationEntry 格式
+    const conversationLogs = aiClient.getAllConversationLogs();
+    const conversationHistory: ConversationEntry[] = conversationLogs.map(log => {
+      // 解析日志内容提取工具调用信息
+      const entry: ConversationEntry = {
+        iteration: log.iteration,
+        role: log.type as 'assistant' | 'tool',
+      };
+      
+      // 从格式化的日志中提取信息
+      if (log.type === 'assistant') {
+        // 提取 content
+        const contentMatch = log.content.match(/【Content】\n([\s\S]*?)(?=\n【Tool Calls】|\n={80})/);
+        if (contentMatch) {
+          entry.content = contentMatch[1].trim();
+        }
+        
+        // 提取 tool calls
+        const toolCallMatch = log.content.match(/\[\d+\]\s+(\w+)\n\s*Arguments:\n([\s\S]*?)(?=\n\s*\[\d+\]|\n={80})/);
+        if (toolCallMatch) {
+          entry.toolName = toolCallMatch[1];
+          try {
+            entry.toolArgs = JSON.parse(toolCallMatch[2].trim());
+          } catch {
+            // 如果解析失败，保留原始字符串
+          }
+        }
+      } else if (log.type === 'tool') {
+        // 提取工具名称
+        const toolNameMatch = log.content.match(/TOOL:\s*(\w+)/);
+        if (toolNameMatch) {
+          entry.toolName = toolNameMatch[1];
+        }
+        
+        // 提取结果
+        const resultMatch = log.content.match(/【Result】\n([\s\S]*?)(?=\n-{80})/);
+        if (resultMatch) {
+          try {
+            entry.toolResult = JSON.parse(resultMatch[1].trim());
+          } catch {
+            // 如果解析失败，保留原始字符串
+            entry.toolResult = resultMatch[1].trim();
+          }
+        }
+      }
+      
+      return entry;
+    });
+
+    // 生成报告配置
+    const reportConfig = {
+      level: args.level === 'level0.1' ? '0.1' : '1',
+      seed: config.seed,
+      duration: config.duration,
+      modelName: aiClient.getConfig().modelName,
+      startTime: startTime.toLocaleString(),
+      endTime: endTime.toLocaleString(),
+      tokenUsage: tokenUsage.cumulative,
+    };
+
     // 生成报告
     console.log('正在生成报告...\n');
     const report = ReportGenerator.generateReport(
-      {
-        level: args.level === 'level0.1' ? '0.1' : '1',
-        seed: config.seed,
-        duration: config.duration,
-        modelName: aiClient.getConfig().modelName,
-        startTime: startTime.toLocaleString(),
-        endTime: endTime.toLocaleString(),
-      },
+      reportConfig,
       metrics
     );
 
@@ -297,7 +357,19 @@ async function main(): Promise<void> {
     const outputFile = args.outputFile || `report-${args.level}-${Date.now()}.md`;
     const outputPath = path.resolve(outputFile);
     fs.writeFileSync(outputPath, report, 'utf-8');
-    console.log(`\n✓ 报告已保存到: ${outputPath}\n`);
+    console.log(`\n✓ 报告已保存到: ${outputPath}`);
+
+    // 生成并保存详细报告
+    console.log('正在生成详细报告...');
+    const detailReport = ReportGenerator.generateDetailReport(
+      { ...reportConfig, conversationHistory },
+      metrics,
+      conversationHistory
+    );
+    const detailOutputFile = outputFile.replace('.md', '-detail.md');
+    const detailOutputPath = path.resolve(detailOutputFile);
+    fs.writeFileSync(detailOutputPath, detailReport, 'utf-8');
+    console.log(`✓ 详细报告已保存到: ${detailOutputPath}\n`);
 
     // 关闭 Web 服务器（如果启用）
     if (webServer) {

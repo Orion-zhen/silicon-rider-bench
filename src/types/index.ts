@@ -67,6 +67,7 @@ export interface Order {
   deliveryFee: number;       // 元（总配送费）
   weight: number;            // kg
   timeLimit: number;         // 分钟
+  createdAt: number;         // 订单创建时间（游戏时间，分钟）
   acceptedAt?: number;       // 游戏时间（分钟）
   deadline?: number;         // 游戏时间（分钟）
   pickedUp: boolean;
@@ -235,6 +236,13 @@ export interface GetLocationInfoResponse {
   type: string;
   name: string;
   position: { x: number; y: number };
+  /** 相邻的位置列表 */
+  neighbors: Array<{
+    id: string;       // 邻居节点 ID
+    name: string;     // 邻居节点名称
+    type: string;     // 邻居节点类型
+    distance: string; // 距离（如 "1.5km"）
+  }>;
 }
 
 /**
@@ -259,6 +267,29 @@ export interface EstimateTimeResponse {
     time: number;
     path: string[];  // 详细路径节点列表
   }>;
+}
+
+/**
+ * get_map 响应
+ * 返回完整地图信息，按类型分组 + 邻接表格式
+ */
+export interface GetMapResponse {
+  /** 按类型分组的位置列表 */
+  locationsByType: {
+    restaurant: string[];      // 格式: "node_id(名称)"
+    supermarket: string[];
+    pharmacy: string[];
+    residential: string[];
+    office: string[];
+    battery_swap: string[];
+  };
+  /** 邻接表：每个位置可以直接到达的相邻位置 */
+  connections: Record<string, Array<{
+    to: string;       // 目标节点 ID
+    name: string;     // 目标节点名称
+    type: string;     // 目标节点类型
+    distance: string; // 距离（如 "1.5km"）
+  }>>;
 }
 
 /**

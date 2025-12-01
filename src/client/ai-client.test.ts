@@ -52,18 +52,85 @@ describe('AIClient', () => {
       expect(config.temperature).toBe(0.5);
     });
 
-    it('should throw error if API key is missing', () => {
+    it('should use placeholder when API key is missing', () => {
       // 临时清除环境变量
       const originalKey = process.env.API_KEY;
       delete process.env.API_KEY;
 
+      // 现在不会抛出错误，而是使用占位符
       expect(() => {
         createAIClient(simulator);
-      }).toThrow('API_KEY is required');
+      }).not.toThrow();
+
+      const client = createAIClient(simulator);
+      const config = client.getConfig();
+      expect(config.apiKey).toBe('sk-no-key-required');
 
       // 恢复环境变量
       if (originalKey) {
         process.env.API_KEY = originalKey;
+      }
+    });
+
+    it('should handle empty API key values', () => {
+      // 测试空字符串、空白字符等情况
+      const originalKey = process.env.API_KEY;
+
+      const emptyValues = ['', '  ', '\t', '\n'];
+
+      emptyValues.forEach(emptyValue => {
+        process.env.API_KEY = emptyValue;
+
+        expect(() => {
+          createAIClient(simulator);
+        }).not.toThrow();
+
+        const client = createAIClient(simulator);
+        const config = client.getConfig();
+        expect(config.apiKey).toBe('sk-no-key-required');
+      });
+
+      // 恢复环境变量
+      if (originalKey) {
+        process.env.API_KEY = originalKey;
+      } else {
+        delete process.env.API_KEY;
+      }
+    });
+
+    it('should work with any base URL without API key', () => {
+      // 测试各种 URL 格式都可以不需要 API_KEY
+      const originalKey = process.env.API_KEY;
+      const originalBaseURL = process.env.BASE_URL;
+      delete process.env.API_KEY;
+
+      const testURLs = [
+        'http://localhost:8080/v1',
+        'http://127.0.0.1:8080/v1',
+        'http://10.0.6.26:9999/api/v1',
+        'https://api.openai.com/v1',
+        'https://openrouter.ai/api/v1',
+      ];
+
+      testURLs.forEach(baseURL => {
+        expect(() => {
+          createAIClient(simulator, { baseURL });
+        }).not.toThrow();
+
+        const client = createAIClient(simulator, { baseURL });
+        const config = client.getConfig();
+        expect(config.apiKey).toBe('sk-no-key-required');
+        expect(config.baseURL).toBe(baseURL);
+      });
+
+      // 恢复环境变量
+      if (originalKey) {
+        process.env.API_KEY = originalKey;
+      }
+      if (originalBaseURL) {
+        process.env.BASE_URL = originalBaseURL;
+      } else {
+        delete process.env.BASE_URL;
       }
     });
   });

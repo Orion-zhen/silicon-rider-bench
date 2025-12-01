@@ -11,6 +11,20 @@
 import { Simulator } from '../core/simulator';
 
 /**
+ * 获取最大迭代次数（从环境变量读取）
+ */
+function getMaxIterations(): number {
+  const envValue = process.env.MAX_ITERATIONS;
+  if (envValue) {
+    const parsed = parseInt(envValue, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 300; // 默认值
+}
+
+/**
  * 生成系统提示词
  * 
  * 这个函数被用于：
@@ -18,11 +32,13 @@ import { Simulator } from '../core/simulator';
  * 2. help 工具调用返回的帮助信息
  * 
  * @param simulator 模拟器实例
+ * @param currentIteration 当前对话轮次（可选，用于动态更新）
  * @returns 系统提示词
  */
-export function generateSystemPrompt(simulator: Simulator): string {
+export function generateSystemPrompt(simulator: Simulator, currentIteration?: number): string {
   const isLevel01 = simulator.isLevel01Mode();
   const agentState = simulator.getAgentState();
+  const maxIterations = getMaxIterations();
 
   const prompt = `
 # Silicon Rider Bench - AI 外卖骑手模拟
@@ -32,7 +48,7 @@ export function generateSystemPrompt(simulator: Simulator): string {
 ## 目标
 ${isLevel01 
   ? '完成单个配送订单，验证基本功能。' 
-  : `在 24 小时内最大化利润。当前时间：${simulator.getFormattedTime()}`
+  : `在 24 小时内最大化利润。当前时间：${simulator.getFormattedTime()}。对话轮次限制：${currentIteration !== undefined ? `${currentIteration}/${maxIterations}` : `共 ${maxIterations} 轮`}`
 }
 
 ## 当前状态
@@ -47,9 +63,10 @@ ${isLevel01
 
 ### 信息查询类
 - **get_my_status()**: 查询当前状态（位置、电量、订单、利润等）
+- **get_map()**: 获取完整地图信息（位置列表按类型分组 + 邻接表连接关系）
 - **search_nearby_orders(radius)**: 搜索指定半径内的可用订单
 - **search_nearby_battery_stations(radius)**: 搜索指定半径内的换电站
-- **get_location_info(locationId)**: 获取位置详细信息
+- **get_location_info(locationId)**: 获取位置详细信息（包括相邻位置和距离）
 - **calculate_distance(fromId, toId)**: 计算两点间最短距离
 - **estimate_time(locationIds)**: 估算路径通行时间（考虑拥堵）
 - **help()**: 显示此帮助信息

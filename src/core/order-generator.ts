@@ -212,6 +212,7 @@ export class OrderGenerator {
       deliveryFee,
       weight,
       timeLimit,
+      createdAt: currentTime,  // Record order creation time
       pickedUp: false,
       delivered: false,
     };
@@ -276,14 +277,23 @@ export class OrderGenerator {
 
   /**
    * 移除过期订单
+   * 如果订单在可用池中存在时间超过其 timeLimit，则视为过期并移除
+   * 这样可以避免 AI 接到已经超时的订单
    */
-  removeExpiredOrders(_currentTime: number): void {
+  removeExpiredOrders(currentTime: number): void {
     const expiredOrders: string[] = [];
     
-    for (const [] of this.availableOrders.entries()) {
-      // 如果订单已经存在超过其时限的时间，则移除
-      // 这里假设订单生成后如果在时限内未被接受就过期
-      // 实际实现可能需要记录订单生成时间
+    for (const [orderId, order] of this.availableOrders.entries()) {
+      // Check if order has been waiting too long (exceeded timeLimit since creation)
+      const waitingTime = currentTime - order.createdAt;
+      if (waitingTime > order.timeLimit) {
+        expiredOrders.push(orderId);
+      }
+    }
+    
+    // Remove expired orders and log if any
+    if (expiredOrders.length > 0) {
+      console.log(`[OrderGenerator] Removing ${expiredOrders.length} expired order(s): ${expiredOrders.join(', ')}`);
     }
     
     expiredOrders.forEach(orderId => this.availableOrders.delete(orderId));

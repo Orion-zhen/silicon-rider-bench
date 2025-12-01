@@ -8,6 +8,27 @@
 import { ScoreMetrics, OrderCompletionRecord } from './score-calculator';
 
 /**
+ * Token 使用量统计
+ */
+export interface TokenUsage {
+  total: number;              // 总 token 数
+  prompt: number;             // 输入 token 数
+  completion: number;         // 输出 token 数
+}
+
+/**
+ * 对话日志条目（用于详细报告）
+ */
+export interface ConversationEntry {
+  iteration: number;          // 对话轮次
+  role: 'assistant' | 'tool'; // 角色类型
+  content?: string;           // 文本内容
+  toolName?: string;          // 工具名称（如果是工具调用）
+  toolArgs?: Record<string, any>; // 工具参数
+  toolResult?: any;           // 工具返回结果
+}
+
+/**
  * 报告配置
  */
 export interface ReportConfig {
@@ -17,6 +38,8 @@ export interface ReportConfig {
   modelName?: string;         // AI 模型名称
   startTime?: string;         // 开始时间
   endTime?: string;           // 结束时间
+  tokenUsage?: TokenUsage;    // Token 使用量统计
+  conversationHistory?: ConversationEntry[]; // 对话历史（用于详细报告）
 }
 
 /**
@@ -88,6 +111,13 @@ export class ReportGenerator {
     
     if (config.endTime) {
       lines.push(`- **End Time**: ${config.endTime}`);
+    }
+    
+    // 添加 Token 使用量统计
+    if (config.tokenUsage) {
+      lines.push(`- **Total Tokens**: ${config.tokenUsage.total.toLocaleString()}`);
+      lines.push(`  - Prompt Tokens: ${config.tokenUsage.prompt.toLocaleString()}`);
+      lines.push(`  - Completion Tokens: ${config.tokenUsage.completion.toLocaleString()}`);
     }
     
     return lines.join('\n') + '\n';
@@ -294,5 +324,116 @@ export class ReportGenerator {
       `准时率: ${(metrics.onTimeRate * 100).toFixed(1)}% | 路径效率: ${metrics.pathEfficiency.toFixed(2)}`,
       `API 违规率: ${(metrics.apiViolationRate * 100).toFixed(1)}%`,
     ].join('\n');
+  }
+
+  /**
+   * 生成详细报告（包含所有 tool call 和 content）
+   * 
+   * @param config 报告配置
+   * @param metrics 评分指标
+   * @param conversationHistory 对话历史
+   * @returns Markdown 格式的详细报告
+   */
+  static generateDetailReport(
+    config: ReportConfig,
+    metrics: ScoreMetrics,
+    conversationHistory?: ConversationEntry[]
+  ): string {
+    const sections: string[] = [];
+    
+    // 标题
+    sections.push('# Silicon Rider Bench - 详细评测报告\n');
+    
+    // 基本信息
+    sections.push(this.generateBasicInfo(config));
+    
+    // 核心指标
+    sections.push(this.generateCoreMetrics(metrics));
+    
+    // Token 使用量详情
+    if (config.tokenUsage) {
+      sections.push(this.generateTokenUsageSection(config.tokenUsage, metrics.totalToolCalls));
+    }
+    
+    // 对话详情
+    if (conversationHistory && conversationHistory.length > 0) {
+      sections.push(this.generateConversationDetails(conversationHistory));
+    }
+    
+    return sections.join('\n');
+  }
+
+  /**
+   * 生成 Token 使用量详情部分
+   */
+  private static generateTokenUsageSection(tokenUsage: TokenUsage, toolCallCount: number): string {
+    const avgTokensPerCall = toolCallCount > 0 
+      ? (tokenUsage.total / toolCallCount).toFixed(1)
+      : 'N/A';
+    
+    return [
+      '## Token 使用量详情\n',
+      `- **Total Tokens**: ${tokenUsage.total.toLocaleString()}`,
+      `- **Prompt Tokens**: ${tokenUsage.prompt.toLocaleString()}`,
+      `- **Completion Tokens**: ${tokenUsage.completion.toLocaleString()}`,
+      `- **Tool Call Count**: ${toolCallCount}`,
+      `- **Average Tokens per Tool Call**: ${avgTokensPerCall}`,
+      '',
+    ].join('\n');
+  }
+
+  /**
+   * 生成对话详情部分
+   */
+  private static generateConversationDetails(history: ConversationEntry[]): string {
+    const lines: string[] = ['## 对话详情\n'];
+    
+    let currentIteration = -1;
+    
+    for (const entry of history) {
+      // 如果是新的迭代轮次，添加分隔线
+      if (entry.iteration !== currentIteration) {
+        currentIteration = entry.iteration;
+        lines.push(`\n### 对话轮次 #${currentIteration}\n`);
+      }
+      
+      if (entry.role === 'assistant') {
+        // 助手消息
+        if (entry.content) {
+          lines.push('**🤖 Assistant Content:**\n');
+          lines.push('```');
+          lines.push(entry.content);
+          lines.push('```\n');
+        }
+        
+        if (entry.toolName) {
+          lines.push(`**🔧 Tool Call:** \`${entry.toolName}\`\n`);
+          if (entry.toolArgs) {
+            lines.push('Arguments:');
+            lines.push('```json');
+            lines.push(JSON.stringify(entry.toolArgs, null, 2));
+            lines.push('```\n');
+          }
+        }
+      } else if (entry.role === 'tool') {
+        // 工具结果
+        lines.push(`**📤 Tool Result:** \`${entry.toolName}\`\n`);
+        if (entry.toolResult !== undefined) {
+          const resultStr = JSON.stringify(entry.toolResult, null, 2);
+          // 如果结果太长，截断显示
+          if (resultStr.length > 2000) {
+            lines.push('```json');
+            lines.push(resultStr.substring(0, 2000) + '\n... (truncated)');
+            lines.push('```\n');
+          } else {
+            lines.push('```json');
+            lines.push(resultStr);
+            lines.push('```\n');
+          }
+        }
+      }
+    }
+    
+    return lines.join('\n');
   }
 }

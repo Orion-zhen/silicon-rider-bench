@@ -77,6 +77,7 @@ describe('AgentState', () => {
         deliveryFee: 5,
         weight: 0.8,
         timeLimit: 20,
+        createdAt: 360,
         pickedUp: false,
         delivered: false,
       };
@@ -99,6 +100,7 @@ describe('AgentState', () => {
         deliveryFee: 5,
         weight: 0.8,
         timeLimit: 20,
+        createdAt: 360,
         pickedUp: false,
         delivered: false,
       };
@@ -124,6 +126,7 @@ describe('AgentState', () => {
         deliveryFee: 5,
         weight: 0.8,
         timeLimit: 20,
+        createdAt: 360,
         pickedUp: false,
         delivered: false,
       };
@@ -175,6 +178,7 @@ describe('AgentState', () => {
           deliveryFee: 5,
           weight: 0.5,
           timeLimit: 20,
+          createdAt: 360,
           pickedUp: false,
           delivered: false,
         };
@@ -199,6 +203,7 @@ describe('AgentState', () => {
         deliveryFee: 8,
         weight: 8,
         timeLimit: 30,
+        createdAt: 360,
         pickedUp: false,
         delivered: false,
       };
@@ -392,6 +397,7 @@ describe('AgentState', () => {
               deliveryFee: 8,
               weight: currentWeight,
               timeLimit: 30,
+              createdAt: 360,
               pickedUp: false,
               delivered: false,
             };
