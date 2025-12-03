@@ -427,9 +427,68 @@ export class AIClient {
           this.webVisualization.sendConversation('assistant', message.content);
         }
 
-        // 正常模式：记录格式化的对话信息
-        if (!isDebugMode) {
-          const logContent = this.formatConversation(iteration, message);
+        // 检查是否有工具调用（支持 OpenAI 标准格式、SGLang XML 格式和 MCP XML 格式）
+        let effectiveToolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] | undefined = message.tool_calls;
+        let sglangReasoning: string | undefined;
+        
+        // 如果没有标准格式的 tool_calls，尝试从 content 解析 XML 格式
+        if ((!effectiveToolCalls || effectiveToolCalls.length === 0) && message.content) {
+          // 首先尝试 MCP 格式 (<use_mcp_tool>)
+          const mcpParsed = this.parseMCPToolCalls(message.content);
+          
+          if (mcpParsed.toolCalls.length > 0) {
+            effectiveToolCalls = mcpParsed.toolCalls as any;
+            
+            // 更新历史记录中的 assistant message，添加 tool_calls
+            const lastMessage = this.conversationHistory[this.conversationHistory.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              (lastMessage as any).tool_calls = effectiveToolCalls;
+            }
+            
+            if (isDebugMode) {
+              console.log('[AI Client] Parsed MCP tool calls:', JSON.stringify(effectiveToolCalls, null, 2));
+            }
+          } else {
+            // 如果 MCP 格式没有解析出内容，尝试 SGLang 格式 (<tool_call>)
+            const sglangParsed = this.parseSGLangToolCalls(message.content);
+            
+            // 如果解析出了 SGLang 格式的 tool calls
+            if (sglangParsed.toolCalls.length > 0) {
+              effectiveToolCalls = sglangParsed.toolCalls as any;
+              sglangReasoning = sglangParsed.reasoning;
+              
+              // 如果有 SGLang reasoning content，发送到 Web 客户端
+              if (this.webVisualization && sglangReasoning) {
+                console.log('[AI Client] SGLang reasoning content detected:', sglangReasoning);
+                this.webVisualization.sendReasoning(sglangReasoning);
+              }
+              
+              // 更新历史记录中的 assistant message，添加 tool_calls
+              const lastMessage = this.conversationHistory[this.conversationHistory.length - 1];
+              if (lastMessage && lastMessage.role === 'assistant') {
+                (lastMessage as any).tool_calls = effectiveToolCalls;
+                // 如果有 SGLang reasoning，也添加到历史中
+                if (sglangReasoning) {
+                  (lastMessage as any).reasoning_content = sglangReasoning;
+                }
+              }
+              
+              if (isDebugMode) {
+                console.log('[AI Client] Parsed SGLang tool calls:', JSON.stringify(effectiveToolCalls, null, 2));
+              }
+            }
+          }
+        }
+
+        // 记录格式化的对话信息（在解析 MCP/SGLang 格式之后）
+        // 创建包含解析后 tool_calls 的消息对象用于日志记录
+        // 注意：无论是否 DEBUG 模式都要记录，以便生成详细报告
+        {
+          const messageForLog = {
+            ...message,
+            tool_calls: effectiveToolCalls || message.tool_calls,
+          } as OpenAI.Chat.Completions.ChatCompletionMessage;
+          const logContent = this.formatConversation(iteration, messageForLog);
           this.conversationLogs.push({
             iteration,
             type: 'assistant',
@@ -437,12 +496,11 @@ export class AIClient {
             timestamp: Date.now(),
           });
         }
-
-        // 检查是否有工具调用
-        if (message.tool_calls && message.tool_calls.length > 0) {
+        
+        if (effectiveToolCalls && effectiveToolCalls.length > 0) {
           // 发送工具调用信息到 Web 客户端
           if (this.webVisualization) {
-            for (const toolCall of message.tool_calls) {
+            for (const toolCall of effectiveToolCalls) {
               try {
                 const args = JSON.parse(toolCall.function.arguments);
                 this.webVisualization.sendToolCall(toolCall.function.name, args);
@@ -454,7 +512,7 @@ export class AIClient {
           }
 
           // 处理工具调用
-          const toolResults = await this.handleToolCalls(message.tool_calls);
+          const toolResults = await this.handleToolCalls(effectiveToolCalls);
 
           // 将工具结果添加到对话历史
           for (const result of toolResults) {
@@ -471,8 +529,8 @@ export class AIClient {
               this.webVisualization.sendToolResult(result.toolName, success, result.result);
             }
 
-            // 正常模式：记录工具调用结果
-            if (!isDebugMode) {
+            // 记录工具调用结果（无论是否 DEBUG 模式都要记录，以便生成详细报告）
+            {
               const logContent = this.formatToolResult(iteration, result);
               this.conversationLogs.push({
                 iteration,
@@ -487,7 +545,7 @@ export class AIClient {
           if (onIteration) {
             onIteration(
               iteration,
-              `Executed ${message.tool_calls.length} tool call(s)`
+              `Executed ${effectiveToolCalls.length} tool call(s)`
             );
           }
         } else {
@@ -614,6 +672,177 @@ export class AIClient {
     for (const log of newLogs) {
       console.log(log.content);
     }
+  }
+
+  /**
+   * 解析 MCP 格式的 tool call
+   * MCP 返回格式: <use_mcp_tool><server_name>...</server_name><tool_name>...</tool_name><arguments>{...}</arguments></use_mcp_tool>
+   * 
+   * @param content 响应内容
+   * @returns 解析结果，包含 tool calls
+   */
+  private parseMCPToolCalls(content: string): {
+    toolCalls: Array<{
+      id: string;
+      type: 'function';
+      function: {
+        name: string;
+        arguments: string;
+      };
+    }>;
+    cleanContent: string;
+  } {
+    const result: {
+      toolCalls: Array<{
+        id: string;
+        type: 'function';
+        function: {
+          name: string;
+          arguments: string;
+        };
+      }>;
+      cleanContent: string;
+    } = {
+      toolCalls: [],
+      cleanContent: content,
+    };
+
+    // 解析所有 <use_mcp_tool> 标签
+    const mcpToolCallRegex = /<use_mcp_tool>([\s\S]*?)<\/use_mcp_tool>/g;
+    let match;
+    let callIndex = 0;
+
+    while ((match = mcpToolCallRegex.exec(content)) !== null) {
+      try {
+        const innerContent = match[1];
+        
+        // 解析 <tool_name>
+        const toolNameMatch = innerContent.match(/<tool_name>([\s\S]*?)<\/tool_name>/);
+        const toolName = toolNameMatch ? toolNameMatch[1].trim() : null;
+        
+        // 解析 <arguments>
+        const argsMatch = innerContent.match(/<arguments>([\s\S]*?)<\/arguments>/);
+        let args = '{}';
+        
+        if (argsMatch) {
+          const argsContent = argsMatch[1].trim();
+          try {
+            // 尝试解析 JSON，验证格式正确
+            JSON.parse(argsContent);
+            args = argsContent;
+          } catch (jsonError) {
+            // 如果 JSON 解析失败，尝试使用 json_repair 风格的修复
+            // 这里简单处理常见问题：移除尾部逗号等
+            const cleanedArgs = argsContent
+              .replace(/,\s*}/g, '}')
+              .replace(/,\s*]/g, ']');
+            try {
+              JSON.parse(cleanedArgs);
+              args = cleanedArgs;
+            } catch {
+              console.warn('Failed to parse MCP arguments:', argsContent);
+              args = '{}';
+            }
+          }
+        }
+        
+        if (toolName) {
+          result.toolCalls.push({
+            id: `mcp_call_${Date.now()}_${callIndex++}`,
+            type: 'function',
+            function: {
+              name: toolName,
+              arguments: args,
+            },
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to parse MCP tool call:', match[1], e);
+      }
+    }
+
+    // 从内容中移除 <use_mcp_tool> 部分
+    result.cleanContent = result.cleanContent.replace(/<use_mcp_tool>[\s\S]*?<\/use_mcp_tool>/g, '').trim();
+
+    return result;
+  }
+
+  /**
+   * 解析 SGLang 格式的 tool call
+   * SGLang 返回格式: <think>...</think><tool_call>{"name": "xxx", "arguments": {...}}</tool_call>
+   * 
+   * @param content 响应内容
+   * @returns 解析结果，包含 reasoning 和 tool calls
+   */
+  private parseSGLangToolCalls(content: string): {
+    reasoning?: string;
+    toolCalls: Array<{
+      id: string;
+      type: 'function';
+      function: {
+        name: string;
+        arguments: string;
+      };
+    }>;
+    cleanContent: string;
+  } {
+    const result: {
+      reasoning?: string;
+      toolCalls: Array<{
+        id: string;
+        type: 'function';
+        function: {
+          name: string;
+          arguments: string;
+        };
+      }>;
+      cleanContent: string;
+    } = {
+      toolCalls: [],
+      cleanContent: content,
+    };
+
+    // 解析 <think> 标签
+    const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+    if (thinkMatch) {
+      result.reasoning = thinkMatch[1].trim();
+      // 从内容中移除 <think> 部分
+      result.cleanContent = result.cleanContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    }
+
+    // 解析所有 <tool_call> 标签
+    const toolCallRegex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+    let match;
+    let callIndex = 0;
+    
+    while ((match = toolCallRegex.exec(content)) !== null) {
+      try {
+        const jsonStr = match[1].trim();
+        const parsed = JSON.parse(jsonStr);
+        
+        // SGLang 格式: {"name": "xxx", "arguments": {...}}
+        if (parsed.name) {
+          result.toolCalls.push({
+            id: `sglang_call_${Date.now()}_${callIndex++}`,
+            type: 'function',
+            function: {
+              name: parsed.name,
+              // arguments 需要是字符串格式
+              arguments: typeof parsed.arguments === 'string' 
+                ? parsed.arguments 
+                : JSON.stringify(parsed.arguments || {}),
+            },
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to parse SGLang tool call:', match[1], e);
+      }
+    }
+
+    // 从内容中移除 <tool_call> 部分
+    result.cleanContent = result.cleanContent.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '').trim();
+
+    return result;
   }
 
   /**

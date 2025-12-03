@@ -12,11 +12,12 @@
 
 import { Simulator } from './core/simulator';
 import { getLevelConfig, printLevelConfig } from './levels/level-config';
-import { createAIClient, generateSystemPrompt } from './client/ai-client';
+import { LevelConfig } from './types';
+import { createAIClient, generateSystemPrompt, AIClient } from './client/ai-client';
 import { TerminalDisplay } from './visualization/terminal-display';
-import { ReportGenerator, ConversationEntry } from './scoring/report-generator';
+import { ReportGenerator, ConversationEntry, ReportStatus } from './scoring/report-generator';
 import { formatStatusDisplay, formatHeader, formatSeparator } from './utils/cli-formatter';
-import { parseArgs } from './cli/args-parser';
+import { parseArgs, CLIArgs } from './cli/args-parser';
 import { WebServer } from './web/web-server';
 import { WebVisualization } from './web/web-visualization';
 import * as fs from 'fs';
@@ -26,6 +27,178 @@ import { fileURLToPath } from 'url';
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// 全局变量，用于优雅退出时生成报告
+let globalSimulator: Simulator | null = null;
+let globalAIClient: AIClient | null = null;
+let globalConfig: LevelConfig | null = null;
+let globalArgs: CLIArgs | null = null;
+let globalStartTime: Date | null = null;
+let globalWebVisualization: WebVisualization | null = null;
+let globalWebServer: WebServer | null = null;
+let isShuttingDown = false;
+
+/**
+ * 生成并保存报告
+ * 
+ * @param status 报告状态
+ * @param statusMessage 状态说明信息
+ */
+async function generateAndSaveReport(
+  status: ReportStatus,
+  statusMessage?: string
+): Promise<void> {
+  if (!globalSimulator || !globalAIClient || !globalConfig || !globalArgs || !globalStartTime) {
+    console.log('\n⚠️ 无法生成报告：模拟器或 AI 客户端未初始化');
+    return;
+  }
+
+  const endTime = new Date();
+  
+  console.log('\n正在计算评分...');
+  const scoreCalculator = globalSimulator.getScoreCalculator();
+  const metrics = scoreCalculator.calculateMetrics();
+
+  // 获取 token 使用量
+  const tokenUsage = globalAIClient.getTokenUsage();
+  
+  // 获取对话历史并转换为 ConversationEntry 格式
+  const conversationLogs = globalAIClient.getAllConversationLogs();
+  const conversationHistory: ConversationEntry[] = conversationLogs.map(log => {
+    const entry: ConversationEntry = {
+      iteration: log.iteration,
+      role: log.type as 'assistant' | 'tool',
+    };
+    
+    if (log.type === 'assistant') {
+      const contentMatch = log.content.match(/【Content】\n([\s\S]*?)(?=\n【Tool Calls】|\n={80})/);
+      if (contentMatch) {
+        entry.content = contentMatch[1].trim();
+      }
+      
+      const toolCallMatch = log.content.match(/\[\d+\]\s+(\w+)\n\s*Arguments:\n([\s\S]*?)(?=\n\s*\[\d+\]|\n={80})/);
+      if (toolCallMatch) {
+        entry.toolName = toolCallMatch[1];
+        try {
+          entry.toolArgs = JSON.parse(toolCallMatch[2].trim());
+        } catch {
+          // 如果解析失败，保留原始字符串
+        }
+      }
+    } else if (log.type === 'tool') {
+      const toolNameMatch = log.content.match(/TOOL:\s*(\w+)/);
+      if (toolNameMatch) {
+        entry.toolName = toolNameMatch[1];
+      }
+      
+      const resultMatch = log.content.match(/【Result】\n([\s\S]*?)(?=\n-{80})/);
+      if (resultMatch) {
+        try {
+          entry.toolResult = JSON.parse(resultMatch[1].trim());
+        } catch {
+          entry.toolResult = resultMatch[1].trim();
+        }
+      }
+    }
+    
+    return entry;
+  });
+
+  // 生成报告配置
+  const aiConfig = globalAIClient.getConfig();
+  const reportConfig = {
+    level: globalArgs.level === 'level0.1' ? '0.1' : '1',
+    seed: globalConfig.seed,
+    duration: globalConfig.duration,
+    modelName: aiConfig.modelName,
+    startTime: globalStartTime.toLocaleString(),
+    endTime: endTime.toLocaleString(),
+    tokenUsage: tokenUsage.cumulative,
+    status,
+    statusMessage,
+    // 配置参数
+    maxIterations: aiConfig.maxIterations,
+    contextHistoryLimit: aiConfig.contextHistoryLimit,
+    temperature: aiConfig.temperature,
+    topP: aiConfig.topP,
+    repetitionPenalty: aiConfig.repetitionPenalty,
+    toolCallFormat: process.env.TOOL_CALL_FORMAT || 'openai',
+  };
+
+  // 生成报告
+  console.log('正在生成报告...\n');
+  const report = ReportGenerator.generateReport(
+    reportConfig,
+    metrics
+  );
+
+  // 输出报告
+  console.log('\n' + formatSeparator('═'));
+  console.log(report);
+  console.log(formatSeparator('═'));
+
+  // 发送模拟结束消息到 Web 客户端
+  if (globalWebVisualization) {
+    globalWebVisualization.sendSimulationEnd(report);
+  }
+
+  // 保存报告到文件
+  const statusSuffix = status === 'interrupted' ? '-interrupted' : '';
+  const outputFile = globalArgs.outputFile || `report-${globalArgs.level}-${Date.now()}${statusSuffix}.md`;
+  const outputPath = path.resolve(outputFile);
+  fs.writeFileSync(outputPath, report, 'utf-8');
+  console.log(`\n✓ 报告已保存到: ${outputPath}`);
+
+  // 生成并保存详细报告
+  console.log('正在生成详细报告...');
+  const detailReport = ReportGenerator.generateDetailReport(
+    { ...reportConfig, conversationHistory },
+    metrics,
+    conversationHistory
+  );
+  const detailOutputFile = outputFile.replace('.md', '-detail.md');
+  const detailOutputPath = path.resolve(detailOutputFile);
+  fs.writeFileSync(detailOutputPath, detailReport, 'utf-8');
+  console.log(`✓ 详细报告已保存到: ${detailOutputPath}\n`);
+
+  // 关闭 Web 服务器（如果启用）
+  if (globalWebServer) {
+    console.log('正在关闭 Web 服务器...');
+    await globalWebServer.stop();
+    console.log('✓ Web 服务器已关闭\n');
+  }
+}
+
+/**
+ * 优雅退出处理器
+ */
+async function handleGracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) {
+    console.log('\n⚠️ 正在关闭中，请稍候...');
+    return;
+  }
+  
+  isShuttingDown = true;
+  console.log(`\n\n📋 收到 ${signal} 信号，正在优雅退出...`);
+  
+  // 设置模拟器状态为中断
+  if (globalSimulator) {
+    globalSimulator.setStatus('completed');
+  }
+  
+  try {
+    await generateAndSaveReport('interrupted', `用户通过 ${signal} 信号中断了模拟`);
+  } catch (error) {
+    console.error('生成报告时出错:', error);
+  }
+  
+  console.log('👋 程序已退出');
+  process.exit(0);
+}
+
+// 注册信号处理器
+process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
 
 /**
  * 显示帮助信息
@@ -205,6 +378,15 @@ async function main(): Promise<void> {
     console.log(`开始时间: ${startTime.toLocaleString()}\n`);
     console.log('开始模拟...\n');
 
+    // 设置全局变量，用于优雅退出时生成报告
+    globalSimulator = simulator;
+    globalAIClient = aiClient;
+    globalConfig = config;
+    globalArgs = args;
+    globalStartTime = startTime;
+    globalWebVisualization = webVisualization;
+    globalWebServer = webServer;
+
     // 设置模拟器状态
     simulator.setStatus('running');
 
@@ -265,118 +447,8 @@ async function main(): Promise<void> {
     console.log(`结束时间: ${endTime.toLocaleString()}`);
     console.log(`实际耗时: ${((endTime.getTime() - startTime.getTime()) / 1000).toFixed(1)} 秒\n`);
 
-    // 计算评分
-    console.log('正在计算评分...');
-    // const stats = simulator.getStats();
-    
-    // 获取评分计算器（从模拟器中）
-    const scoreCalculator = simulator.getScoreCalculator();
-    const metrics = scoreCalculator.calculateMetrics();
-
-    // 获取 token 使用量
-    const tokenUsage = aiClient.getTokenUsage();
-    
-    // 获取对话历史并转换为 ConversationEntry 格式
-    const conversationLogs = aiClient.getAllConversationLogs();
-    const conversationHistory: ConversationEntry[] = conversationLogs.map(log => {
-      // 解析日志内容提取工具调用信息
-      const entry: ConversationEntry = {
-        iteration: log.iteration,
-        role: log.type as 'assistant' | 'tool',
-      };
-      
-      // 从格式化的日志中提取信息
-      if (log.type === 'assistant') {
-        // 提取 content
-        const contentMatch = log.content.match(/【Content】\n([\s\S]*?)(?=\n【Tool Calls】|\n={80})/);
-        if (contentMatch) {
-          entry.content = contentMatch[1].trim();
-        }
-        
-        // 提取 tool calls
-        const toolCallMatch = log.content.match(/\[\d+\]\s+(\w+)\n\s*Arguments:\n([\s\S]*?)(?=\n\s*\[\d+\]|\n={80})/);
-        if (toolCallMatch) {
-          entry.toolName = toolCallMatch[1];
-          try {
-            entry.toolArgs = JSON.parse(toolCallMatch[2].trim());
-          } catch {
-            // 如果解析失败，保留原始字符串
-          }
-        }
-      } else if (log.type === 'tool') {
-        // 提取工具名称
-        const toolNameMatch = log.content.match(/TOOL:\s*(\w+)/);
-        if (toolNameMatch) {
-          entry.toolName = toolNameMatch[1];
-        }
-        
-        // 提取结果
-        const resultMatch = log.content.match(/【Result】\n([\s\S]*?)(?=\n-{80})/);
-        if (resultMatch) {
-          try {
-            entry.toolResult = JSON.parse(resultMatch[1].trim());
-          } catch {
-            // 如果解析失败，保留原始字符串
-            entry.toolResult = resultMatch[1].trim();
-          }
-        }
-      }
-      
-      return entry;
-    });
-
-    // 生成报告配置
-    const reportConfig = {
-      level: args.level === 'level0.1' ? '0.1' : '1',
-      seed: config.seed,
-      duration: config.duration,
-      modelName: aiClient.getConfig().modelName,
-      startTime: startTime.toLocaleString(),
-      endTime: endTime.toLocaleString(),
-      tokenUsage: tokenUsage.cumulative,
-    };
-
-    // 生成报告
-    console.log('正在生成报告...\n');
-    const report = ReportGenerator.generateReport(
-      reportConfig,
-      metrics
-    );
-
-    // 输出报告
-    console.log('\n' + formatSeparator('═'));
-    console.log(report);
-    console.log(formatSeparator('═'));
-
-    // 发送模拟结束消息到 Web 客户端
-    if (webVisualization) {
-      webVisualization.sendSimulationEnd(report);
-    }
-
-    // 保存报告到文件
-    const outputFile = args.outputFile || `report-${args.level}-${Date.now()}.md`;
-    const outputPath = path.resolve(outputFile);
-    fs.writeFileSync(outputPath, report, 'utf-8');
-    console.log(`\n✓ 报告已保存到: ${outputPath}`);
-
-    // 生成并保存详细报告
-    console.log('正在生成详细报告...');
-    const detailReport = ReportGenerator.generateDetailReport(
-      { ...reportConfig, conversationHistory },
-      metrics,
-      conversationHistory
-    );
-    const detailOutputFile = outputFile.replace('.md', '-detail.md');
-    const detailOutputPath = path.resolve(detailOutputFile);
-    fs.writeFileSync(detailOutputPath, detailReport, 'utf-8');
-    console.log(`✓ 详细报告已保存到: ${detailOutputPath}\n`);
-
-    // 关闭 Web 服务器（如果启用）
-    if (webServer) {
-      console.log('正在关闭 Web 服务器...');
-      await webServer.stop();
-      console.log('✓ Web 服务器已关闭\n');
-    }
+    // 使用统一的报告生成函数
+    await generateAndSaveReport('completed');
 
   } catch (error) {
     console.error('\n❌ 错误:', error);

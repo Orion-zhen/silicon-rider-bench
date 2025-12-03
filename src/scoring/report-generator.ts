@@ -29,6 +29,11 @@ export interface ConversationEntry {
 }
 
 /**
+ * 报告状态
+ */
+export type ReportStatus = 'completed' | 'interrupted' | 'error';
+
+/**
  * 报告配置
  */
 export interface ReportConfig {
@@ -40,6 +45,15 @@ export interface ReportConfig {
   endTime?: string;           // 结束时间
   tokenUsage?: TokenUsage;    // Token 使用量统计
   conversationHistory?: ConversationEntry[]; // 对话历史（用于详细报告）
+  status?: ReportStatus;      // 报告状态（完成/中断/错误）
+  statusMessage?: string;     // 状态说明信息
+  // 采样参数配置
+  maxIterations?: number;     // 最大迭代次数
+  contextHistoryLimit?: number; // 上下文历史限制
+  temperature?: number;       // Temperature 采样参数
+  topP?: number;              // Top-P 采样参数
+  repetitionPenalty?: number; // 重复惩罚参数
+  toolCallFormat?: string;    // Tool Call 格式
 }
 
 /**
@@ -96,10 +110,23 @@ export class ReportGenerator {
   private static generateBasicInfo(config: ReportConfig): string {
     const lines: string[] = [
       '## 基本信息\n',
-      `- **Level**: ${config.level}`,
-      `- **Seed**: ${config.seed}`,
-      `- **Duration**: ${this.formatDuration(config.duration)}`,
     ];
+    
+    // 添加状态信息（如果有）
+    if (config.status) {
+      const statusEmoji = config.status === 'completed' ? '✅' : 
+                          config.status === 'interrupted' ? '⚠️' : '❌';
+      const statusText = config.status === 'completed' ? '已完成' : 
+                         config.status === 'interrupted' ? '未完成（用户中断）' : '错误';
+      lines.push(`- **Status**: ${statusEmoji} ${statusText}`);
+      if (config.statusMessage) {
+        lines.push(`  - ${config.statusMessage}`);
+      }
+    }
+    
+    lines.push(`- **Level**: ${config.level}`);
+    lines.push(`- **Seed**: ${config.seed}`);
+    lines.push(`- **Duration**: ${this.formatDuration(config.duration)}`);
     
     if (config.modelName) {
       lines.push(`- **Model**: ${config.modelName}`);
@@ -118,6 +145,36 @@ export class ReportGenerator {
       lines.push(`- **Total Tokens**: ${config.tokenUsage.total.toLocaleString()}`);
       lines.push(`  - Prompt Tokens: ${config.tokenUsage.prompt.toLocaleString()}`);
       lines.push(`  - Completion Tokens: ${config.tokenUsage.completion.toLocaleString()}`);
+    }
+    
+    // 添加配置参数
+    const hasConfigParams = config.maxIterations !== undefined || 
+                            config.contextHistoryLimit !== undefined ||
+                            config.temperature !== undefined ||
+                            config.topP !== undefined ||
+                            config.repetitionPenalty !== undefined ||
+                            config.toolCallFormat !== undefined;
+    
+    if (hasConfigParams) {
+      lines.push('- **Configuration**:');
+      if (config.maxIterations !== undefined) {
+        lines.push(`  - Max Iterations: ${config.maxIterations}`);
+      }
+      if (config.contextHistoryLimit !== undefined) {
+        lines.push(`  - Context History Limit: ${config.contextHistoryLimit || 'unlimited'}`);
+      }
+      if (config.temperature !== undefined) {
+        lines.push(`  - Temperature: ${config.temperature}`);
+      }
+      if (config.topP !== undefined) {
+        lines.push(`  - Top-P: ${config.topP}`);
+      }
+      if (config.repetitionPenalty !== undefined) {
+        lines.push(`  - Repetition Penalty: ${config.repetitionPenalty}`);
+      }
+      if (config.toolCallFormat !== undefined) {
+        lines.push(`  - Tool Call Format: ${config.toolCallFormat}`);
+      }
     }
     
     return lines.join('\n') + '\n';

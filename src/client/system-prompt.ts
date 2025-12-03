@@ -11,6 +11,22 @@
 import { Simulator } from '../core/simulator';
 
 /**
+ * Tool Call 格式类型
+ */
+export type ToolCallFormat = 'openai' | 'sglang' | 'mcp';
+
+/**
+ * 获取 Tool Call 格式（从环境变量读取）
+ */
+export function getToolCallFormat(): ToolCallFormat {
+  const envValue = process.env.TOOL_CALL_FORMAT?.toLowerCase();
+  if (envValue === 'sglang' || envValue === 'mcp') {
+    return envValue;
+  }
+  return 'openai'; // 默认值
+}
+
+/**
  * 获取最大迭代次数（从环境变量读取）
  */
 function getMaxIterations(): number {
@@ -22,6 +38,117 @@ function getMaxIterations(): number {
     }
   }
   return 300; // 默认值
+}
+
+/**
+ * 生成 MCP 格式的 Tool Call 使用说明
+ */
+function generateMCPToolCallInstructions(): string {
+  return `
+## Tool Call 格式说明
+
+本系统使用 MCP (Model Context Protocol) 格式进行工具调用。工具调用使用 XML 风格标签格式化。
+
+### 使用格式
+\`\`\`xml
+<use_mcp_tool>
+<server_name>silicon-rider</server_name>
+<tool_name>工具名称</tool_name>
+<arguments>
+{
+  "参数名": "参数值"
+}
+</arguments>
+</use_mcp_tool>
+\`\`\`
+
+### 重要说明
+- server_name 固定为 \`silicon-rider\`
+- tool_name 必须是下方列出的可用工具名称
+- arguments 必须是有效的 JSON 格式
+- 字符串中的引号需要转义，例如 \`"value \\"escaped\\""\`
+- 工具调用必须放在回复的**末尾**，不能嵌套在其他标签内
+
+### 示例
+查询当前状态：
+\`\`\`xml
+<use_mcp_tool>
+<server_name>silicon-rider</server_name>
+<tool_name>get_my_status</tool_name>
+<arguments>
+{}
+</arguments>
+</use_mcp_tool>
+\`\`\`
+
+搜索附近订单：
+\`\`\`xml
+<use_mcp_tool>
+<server_name>silicon-rider</server_name>
+<tool_name>search_nearby_orders</tool_name>
+<arguments>
+{
+  "radius": 5
+}
+</arguments>
+</use_mcp_tool>
+\`\`\`
+`;
+}
+
+/**
+ * 生成 SGLang 格式的 Tool Call 使用说明
+ */
+function generateSGLangToolCallInstructions(): string {
+  return `
+## Tool Call 格式说明
+
+本系统使用 SGLang XML 格式进行工具调用。
+
+### 使用格式
+你可以先在 \`<think>\` 标签中进行思考，然后使用 \`<tool_call>\` 标签调用工具：
+
+\`\`\`xml
+<think>
+这里是你的思考过程...
+</think>
+<tool_call>
+{"name": "工具名称", "arguments": {"参数名": "参数值"}}
+</tool_call>
+\`\`\`
+
+### 重要说明
+- \`<think>\` 标签是可选的，用于展示推理过程
+- \`<tool_call>\` 标签内必须是有效的 JSON 格式
+- JSON 必须包含 \`name\` 和 \`arguments\` 字段
+- 可以在一次回复中调用多个工具（使用多个 \`<tool_call>\` 标签）
+
+### 示例
+查询当前状态：
+\`\`\`xml
+<think>
+我需要先了解当前的状态，包括位置、电量等信息。
+</think>
+<tool_call>
+{"name": "get_my_status", "arguments": {}}
+</tool_call>
+\`\`\`
+
+搜索附近订单：
+\`\`\`xml
+<tool_call>
+{"name": "search_nearby_orders", "arguments": {"radius": 5}}
+</tool_call>
+\`\`\`
+`;
+}
+
+/**
+ * 生成 OpenAI 格式的 Tool Call 使用说明（默认，无需特殊说明）
+ */
+function generateOpenAIToolCallInstructions(): string {
+  // OpenAI 格式是默认格式，SDK 会自动处理，不需要特殊说明
+  return '';
 }
 
 /**
@@ -39,8 +166,25 @@ export function generateSystemPrompt(simulator: Simulator, currentIteration?: nu
   const isLevel01 = simulator.isLevel01Mode();
   const agentState = simulator.getAgentState();
   const maxIterations = getMaxIterations();
+  const toolCallFormat = getToolCallFormat();
 
-  const prompt = `
+  // 根据格式生成对应的 tool call 说明
+  let toolCallInstructions = '';
+  switch (toolCallFormat) {
+    case 'mcp':
+      toolCallInstructions = generateMCPToolCallInstructions();
+      break;
+    case 'sglang':
+      toolCallInstructions = generateSGLangToolCallInstructions();
+      break;
+    case 'openai':
+    default:
+      toolCallInstructions = generateOpenAIToolCallInstructions();
+      break;
+  }
+
+  // 静态部分 - 放在前面以最大化 KV Cache 复用
+  const staticPrompt = `
 # Silicon Rider Bench - AI 外卖骑手模拟
 
 你是一个 AI 外卖骑手，在虚拟城市中配送订单以赚取利润。
@@ -48,16 +192,9 @@ export function generateSystemPrompt(simulator: Simulator, currentIteration?: nu
 ## 目标
 ${isLevel01 
   ? '完成单个配送订单，验证基本功能。' 
-  : `在 24 小时内最大化利润。当前时间：${simulator.getFormattedTime()}。对话轮次限制：${currentIteration !== undefined ? `${currentIteration}/${maxIterations}` : `共 ${maxIterations} 轮`}`
+  : '在有限时间和轮次内最大化利润。'
 }
-
-## 当前状态
-- 位置：${agentState.getPosition()}
-- 电量：${agentState.getBattery()}%（续航 ${agentState.getBatteryRange().toFixed(1)} km）
-- 携带订单：${agentState.getCarriedOrders().length}/5
-- 总重量：${agentState.getTotalWeight().toFixed(1)}/10 kg
-- 当前利润：¥${agentState.getProfit().toFixed(2)}
-
+${toolCallInstructions}
 ## 可用工具
 你可以调用以下工具来完成配送任务, 一次对话支持同时调用多个工具, 但是工具调用的先后顺序有区别, 请根据实际情况选择：
 
@@ -116,8 +253,32 @@ ${isLevel01
 ${isLevel01
   ? '请严格按照上述流程调用工具完成配送。记住：到达送餐点后必须调用 deliver_food 工具！'
   : '请开始配送任务，通过调用工具来最大化利润。记住：每个订单都必须调用 deliver_food 才能获得配送费！'
-}
-`.trim();
+}`;
+
+  // 动态部分 - 放在最后以最小化 KV Cache 逐出
+  const dynamicPrompt = isLevel01 
+    ? `
+
+---
+## 当前状态
+- 位置：${agentState.getPosition()}
+- 电量：${agentState.getBattery()}%（续航 ${agentState.getBatteryRange().toFixed(1)} km）
+- 携带订单：${agentState.getCarriedOrders().length}/5
+- 总重量：${agentState.getTotalWeight().toFixed(1)}/10 kg
+- 当前利润：¥${agentState.getProfit().toFixed(2)}`
+    : `
+
+---
+## 当前状态
+- 当前时间：${simulator.getFormattedTime()}
+- 对话轮次：${currentIteration !== undefined ? `${currentIteration}/${maxIterations}` : `共 ${maxIterations} 轮`}
+- 位置：${agentState.getPosition()}
+- 电量：${agentState.getBattery()}%（续航 ${agentState.getBatteryRange().toFixed(1)} km）
+- 携带订单：${agentState.getCarriedOrders().length}/5
+- 总重量：${agentState.getTotalWeight().toFixed(1)}/10 kg
+- 当前利润：¥${agentState.getProfit().toFixed(2)}`;
+
+  const prompt = (staticPrompt + dynamicPrompt).trim();
 
   return prompt;
 }
