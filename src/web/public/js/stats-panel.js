@@ -32,6 +32,18 @@ class StatsPanel {
     this.currentTime = 0;
     
     this.initialize();
+    
+    // Subscribe to language changes
+    if (typeof i18n !== 'undefined') {
+      i18n.subscribe(() => this.updateLabels());
+    }
+  }
+
+  /**
+   * Get translation helper
+   */
+  t(key) {
+    return typeof i18n !== 'undefined' ? i18n.t(key) : key;
   }
 
   /**
@@ -42,73 +54,73 @@ class StatsPanel {
     
     this.container.innerHTML = `
       <div class="stat-section">
-        <h3>Game Status</h3>
+        <h3 class="section-title-game">${this.t('stats.gameStatus')}</h3>
         <div class="stat-content">
           <div class="stat-item">
-            <span class="stat-label">Connection:</span>
+            <span class="stat-label label-connection">${this.t('stats.connection')}:</span>
             <div id="connection-status-inline" class="connection-status disconnected">
               <span class="status-dot"></span>
-              <span class="status-text">Disconnected</span>
+              <span class="status-text">${this.t('stats.disconnected')}</span>
             </div>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Model:</span>
+            <span class="stat-label label-model">${this.t('stats.model')}:</span>
             <span class="stat-value" id="stat-model">--</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Time:</span>
+            <span class="stat-label label-time">${this.t('stats.time')}:</span>
             <span class="stat-value" id="stat-time">--:--</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Turn:</span>
+            <span class="stat-label label-turn">${this.t('stats.turn')}:</span>
             <span class="stat-value" id="stat-turn">0/0</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Tokens (Last):</span>
+            <span class="stat-label label-tokens-last">${this.t('stats.tokensLast')}:</span>
             <span class="stat-value" id="stat-tokens-last">0</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Tokens (Total):</span>
+            <span class="stat-label label-tokens-total">${this.t('stats.tokensTotal')}:</span>
             <span class="stat-value" id="stat-tokens-total">0</span>
           </div>
         </div>
       </div>
       
       <div class="stat-section">
-        <h3>Agent Status</h3>
+        <h3 class="section-title-agent">${this.t('stats.agentStatus')}</h3>
         <div class="stat-content">
           <div class="stat-item">
-            <span class="stat-label">Tool Calls:</span>
+            <span class="stat-label label-tool-calls">${this.t('stats.toolCalls')}:</span>
             <span class="stat-value" id="stat-tool-calls">0</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Battery:</span>
+            <span class="stat-label label-battery">${this.t('stats.battery')}:</span>
             <span class="stat-value" id="stat-battery">--%</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Profit:</span>
+            <span class="stat-label label-profit">${this.t('stats.profit')}:</span>
             <span class="stat-value" id="stat-profit">¥0.00</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Carried Orders:</span>
+            <span class="stat-label label-carried">${this.t('stats.carriedOrders')}:</span>
             <span class="stat-value" id="stat-carried">0</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Total Weight:</span>
+            <span class="stat-label label-weight">${this.t('stats.totalWeight')}:</span>
             <span class="stat-value" id="stat-weight">0.0 kg</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Completed:</span>
+            <span class="stat-label label-completed">${this.t('stats.completed')}:</span>
             <span class="stat-value" id="stat-completed">0</span>
           </div>
         </div>
       </div>
       
       <div class="stat-section orders-section">
-        <h3>Orders in Backpack</h3>
+        <h3 class="section-title-orders">${this.t('stats.ordersInBackpack')}</h3>
         <div class="stat-content">
           <div id="orders-list" class="orders-list">
-            <div class="no-orders">No orders</div>
+            <div class="no-orders">${this.t('stats.noOrders')}</div>
           </div>
         </div>
       </div>
@@ -146,6 +158,64 @@ class StatsPanel {
   }
 
   /**
+   * Update labels when language changes
+   */
+  updateLabels() {
+    // Update section titles
+    const sectionTitleGame = this.container.querySelector('.section-title-game');
+    if (sectionTitleGame) sectionTitleGame.textContent = this.t('stats.gameStatus');
+    
+    const sectionTitleAgent = this.container.querySelector('.section-title-agent');
+    if (sectionTitleAgent) sectionTitleAgent.textContent = this.t('stats.agentStatus');
+    
+    const sectionTitleOrders = this.container.querySelector('.section-title-orders');
+    if (sectionTitleOrders) sectionTitleOrders.textContent = this.t('stats.ordersInBackpack');
+    
+    // Update stat labels
+    const labelMappings = {
+      '.label-connection': 'stats.connection',
+      '.label-model': 'stats.model',
+      '.label-time': 'stats.time',
+      '.label-turn': 'stats.turn',
+      '.label-tokens-last': 'stats.tokensLast',
+      '.label-tokens-total': 'stats.tokensTotal',
+      '.label-tool-calls': 'stats.toolCalls',
+      '.label-battery': 'stats.battery',
+      '.label-profit': 'stats.profit',
+      '.label-carried': 'stats.carriedOrders',
+      '.label-weight': 'stats.totalWeight',
+      '.label-completed': 'stats.completed'
+    };
+    
+    Object.entries(labelMappings).forEach(([selector, key]) => {
+      const element = this.container.querySelector(selector);
+      if (element) {
+        element.textContent = this.t(key) + ':';
+      }
+    });
+    
+    // Update connection status text
+    if (this.elements.connectionStatus) {
+      const statusText = this.elements.connectionStatus.querySelector('.status-text');
+      if (statusText) {
+        if (this.elements.connectionStatus.classList.contains('connected')) {
+          statusText.textContent = this.t('stats.connected');
+        } else if (this.elements.connectionStatus.classList.contains('reconnecting')) {
+          statusText.textContent = this.t('stats.reconnecting');
+        } else {
+          statusText.textContent = this.t('stats.disconnected');
+        }
+      }
+    }
+    
+    // Update no orders text
+    const noOrders = this.container.querySelector('.no-orders');
+    if (noOrders) {
+      noOrders.textContent = this.t('stats.noOrders');
+    }
+  }
+
+  /**
    * Update tool calls count (called when tool_call message is received)
    * @param {number} count - Total tool call count
    */
@@ -179,8 +249,10 @@ class StatsPanel {
     }
 
     // Update turn (only if changed)
+    // Use ∞ symbol for unlimited mode (maxIterations === 0)
     if (this.elements.turn && currentIteration !== undefined && maxIterations !== undefined) {
-      const turnText = `${currentIteration}/${maxIterations}`;
+      const maxDisplay = maxIterations === 0 ? '∞' : maxIterations;
+      const turnText = `${currentIteration}/${maxDisplay}`;
       if (turnText !== this.previousValues.turn) {
         this.animateTimeChange(this.elements.turn, turnText);
         this.previousValues.turn = turnText;

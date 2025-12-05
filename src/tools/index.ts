@@ -10,22 +10,30 @@ export * from './tool-executor';
 
 import { ToolRegistry } from './tool-registry';
 import { getQueryTools } from './query-tools';
-import { getActionTools } from './action-tools';
+import { getActionTools, getActionToolsV2 } from './action-tools';
 
 /**
  * 创建并初始化工具注册表
  * 注册所有可用工具
  * 
+ * @param v2Mode 是否为 V2 模式（使用多模态取餐工具）
  * @returns 已注册所有工具的注册表实例
  */
-export function createToolRegistry(): ToolRegistry {
+export function createToolRegistry(v2Mode: boolean = false): ToolRegistry {
   const registry = new ToolRegistry();
   
   // 注册查询工具
   registry.registerAll(getQueryTools());
   
   // 注册行动工具
-  registry.registerAll(getActionTools());
+  if (v2Mode) {
+    // V2 模式：使用 get_receipts 和 pickup_food_by_phone_number，不包含 pickup_food
+    registry.registerAll(getActionToolsV2());
+    console.log('[ToolRegistry] Registered V2 action tools (multimodal pickup)');
+  } else {
+    // V1 模式：使用原有的 pickup_food
+    registry.registerAll(getActionTools());
+  }
   
   return registry;
 }

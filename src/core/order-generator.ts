@@ -3,10 +3,11 @@
  * 负责根据时间、订单潮汐规则生成订单，并管理订单池
  */
 
-import { Order, OrderType, Node } from '../types';
+import { Order, OrderType, Node, ReceiptData } from '../types';
 import { SeededRNG } from '../utils/seeded-rng';
 import { calculateTotalFee } from './fee-calculator';
 import { getFoodSelector } from '../data/food-selector';
+import { ReceiptDataManager } from '../data/receipt-data-manager';
 
 /**
  * 订单潮汐配置
@@ -27,6 +28,10 @@ export class OrderGenerator {
   private availableOrders: Map<string, Order> = new Map();
   private acceptedOrders: Set<string> = new Set();
   
+  // V2 mode settings
+  private v2Mode: boolean = false;
+  private receiptDataManager: ReceiptDataManager | null = null;
+  
   // 订单潮汐规则
   private tideRules: OrderTideConfig[] = [
     // 早高峰（6:00-9:00）：餐饮 ×3
@@ -45,6 +50,31 @@ export class OrderGenerator {
 
   constructor(seed: number) {
     this.rng = new SeededRNG(seed);
+  }
+
+  /**
+   * Enable V2 mode with real receipt data
+   */
+  setV2Mode(enabled: boolean, dataManager?: ReceiptDataManager): void {
+    this.v2Mode = enabled;
+    this.receiptDataManager = dataManager || null;
+    if (enabled) {
+      console.log('[OrderGenerator] V2 mode enabled - using real receipt data');
+    }
+  }
+
+  /**
+   * Check if V2 mode is enabled
+   */
+  isV2Mode(): boolean {
+    return this.v2Mode;
+  }
+
+  /**
+   * Get the receipt data manager (for V2 mode)
+   */
+  getReceiptDataManager(): ReceiptDataManager | null {
+    return this.receiptDataManager;
   }
 
   /**
@@ -162,6 +192,24 @@ export class OrderGenerator {
     pickupNodes: Node[],
     deliveryNodes: Node[],
     distanceCalculator: (from: string, to: string) => number
+  ): Order | null {
+    // V2 mode: use real receipt data
+    if (this.v2Mode) {
+      return this.generateV2Order(currentTime, pickupNodes, deliveryNodes, distanceCalculator);
+    }
+
+    // V1 mode: original random generation logic
+    return this.generateV1Order(currentTime, pickupNodes, deliveryNodes, distanceCalculator);
+  }
+
+  /**
+   * Generate V1 order (original random generation)
+   */
+  private generateV1Order(
+    currentTime: number,
+    pickupNodes: Node[],
+    deliveryNodes: Node[],
+    distanceCalculator: (from: string, to: string) => number
   ): Order {
     const orderType = this.generateOrderType(currentTime);
     
@@ -222,6 +270,89 @@ export class OrderGenerator {
   }
 
   /**
+   * Generate V2 order using real receipt data
+   */
+  private generateV2Order(
+    currentTime: number,
+    pickupNodes: Node[],
+    deliveryNodes: Node[],
+    distanceCalculator: (from: string, to: string) => number
+  ): Order | null {
+    if (!this.receiptDataManager) {
+      console.error('[OrderGenerator] V2 mode enabled but no receipt data manager available');
+      return null;
+    }
+
+    // Get next available receipt data
+    const receiptData = this.receiptDataManager.getNextAvailableOrder();
+    if (!receiptData) {
+      console.warn('[OrderGenerator] No available receipt data (all orders in use)');
+      return null;
+    }
+
+    // V2 mode only generates food orders (restaurants)
+    const orderType: OrderType = 'food';
+    const restaurants = pickupNodes.filter(n => n.type === 'restaurant');
+    if (restaurants.length === 0) {
+      console.error('[OrderGenerator] No restaurants available for V2 order');
+      this.receiptDataManager.markOrderExpired(`#${receiptData.order_id}`);
+      return null;
+    }
+    const pickupNode = this.rng.choice(restaurants);
+    
+    // 选择送餐点（居民区或写字楼）
+    const deliveryNodeCandidates = deliveryNodes.filter(
+      n => n.type === 'residential' || n.type === 'office'
+    );
+    const deliveryNode = this.rng.choice(
+      deliveryNodeCandidates.length > 0 ? deliveryNodeCandidates : deliveryNodes
+    );
+    
+    // 计算距离
+    const distance = distanceCalculator(pickupNode.id, deliveryNode.id);
+    
+    // Use data from receipt
+    const itemPrice = receiptData.total_price;
+    const timeLimit = this.calculateTimeLimit(distance);
+    
+    // Generate weight based on food order type (0.5-1kg)
+    const weight = this.rng.nextFloatRange(0.5, 1);
+    
+    // Delivery fee is still randomly generated
+    const deliveryFee = calculateTotalFee(distance, itemPrice, 0);
+    
+    // Build order name from food items
+    const foodNames = receiptData.food_items.map(item => item.name);
+    const name = foodNames.length > 2 
+      ? `${foodNames.slice(0, 2).join('、')}等${foodNames.length}样` 
+      : foodNames.join('、');
+    
+    const order: Order = {
+      id: `#${receiptData.order_id}`,  // Use dataset format: #0001, #0002, etc.
+      type: orderType,
+      name,
+      pickupLocation: pickupNode.id,
+      deliveryLocation: deliveryNode.id,
+      distance,
+      itemPrice,
+      deliveryFee,
+      weight,
+      timeLimit,
+      createdAt: currentTime,
+      pickedUp: false,
+      delivered: false,
+      // V2 specific fields
+      phoneNumber: receiptData.phone_number,
+      receiptImagePath: receiptData.image_filename,
+      foodItems: receiptData.food_items,
+    };
+    
+    this.availableOrders.set(order.id, order);
+    console.log(`[OrderGenerator] Generated V2 order: ${order.id}`);
+    return order;
+  }
+
+  /**
    * 批量生成订单
    */
   generateOrders(
@@ -233,7 +364,10 @@ export class OrderGenerator {
   ): Order[] {
     const orders: Order[] = [];
     for (let i = 0; i < count; i++) {
-      orders.push(this.generateOrder(currentTime, pickupNodes, deliveryNodes, distanceCalculator));
+      const order = this.generateOrder(currentTime, pickupNodes, deliveryNodes, distanceCalculator);
+      if (order) {
+        orders.push(order);
+      }
     }
     return orders;
   }
@@ -296,7 +430,22 @@ export class OrderGenerator {
       console.log(`[OrderGenerator] Removing ${expiredOrders.length} expired order(s): ${expiredOrders.join(', ')}`);
     }
     
-    expiredOrders.forEach(orderId => this.availableOrders.delete(orderId));
+    expiredOrders.forEach(orderId => {
+      this.availableOrders.delete(orderId);
+      // V2 mode: release the order ID for reuse
+      if (this.v2Mode && this.receiptDataManager) {
+        this.receiptDataManager.markOrderExpired(orderId);
+      }
+    });
+  }
+
+  /**
+   * Notify that an order has been completed (for V2 mode to release the ID)
+   */
+  notifyOrderCompleted(orderId: string): void {
+    if (this.v2Mode && this.receiptDataManager) {
+      this.receiptDataManager.markOrderCompleted(orderId);
+    }
   }
 
   /**

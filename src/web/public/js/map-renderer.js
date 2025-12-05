@@ -53,6 +53,64 @@ class MapRenderer {
       office: '🏢',
       battery_swap: '🔋',
     };
+    
+    // Model name for agent badge
+    this.modelName = '';
+  }
+
+  /**
+   * Set the model name for the agent badge
+   * @param {string} modelName - Full model name (e.g., "openai/gpt-4" or "claude-3")
+   */
+  setModelName(modelName) {
+    this.modelName = modelName || '';
+    
+    // Update existing agent badge if present
+    this.updateAgentBadge();
+  }
+
+  /**
+   * Get the display name for the model (part after "/" if present)
+   * @returns {string} Display name
+   */
+  getModelDisplayName() {
+    if (!this.modelName) return '';
+    
+    const trimmed = this.modelName.trim();
+    const slashIndex = trimmed.lastIndexOf('/');
+    
+    if (slashIndex !== -1 && slashIndex < trimmed.length - 1) {
+      return trimmed.substring(slashIndex + 1);
+    }
+    
+    return trimmed;
+  }
+
+  /**
+   * Update the agent badge with current model name
+   */
+  updateAgentBadge() {
+    if (!this.agentElement) return;
+    
+    let badge = this.agentElement.querySelector('.agent-model-badge');
+    const displayName = this.getModelDisplayName();
+    
+    if (!displayName) {
+      // Remove badge if no model name
+      if (badge) {
+        badge.remove();
+      }
+      return;
+    }
+    
+    if (!badge) {
+      // Create badge
+      badge = document.createElement('div');
+      badge.className = 'agent-model-badge';
+      this.agentElement.appendChild(badge);
+    }
+    
+    badge.textContent = displayName;
   }
 
   /**
@@ -1151,17 +1209,24 @@ class MapRenderer {
         const screen = this.worldToScreen(agentNode.x, agentNode.y);
         
         if (!this.agentElement) {
-          // 创建新的 agent 元素
+          // 创建新的 agent 元素（包含 emoji 和 badge 容器）
           this.agentElement = document.createElement('div');
           this.agentElement.className = 'agent-marker';
           this.agentElement.style.position = 'absolute';
           this.agentElement.style.left = `${screen.x}px`;
           this.agentElement.style.top = `${screen.y}px`;
-          this.agentElement.style.transform = 'translate(-50%, -50%) scale(1.5)';
-          this.agentElement.style.fontSize = '32px';
           this.agentElement.style.zIndex = '100';
-          this.agentElement.textContent = '🛵';
+          
+          // Create emoji element
+          const emojiSpan = document.createElement('span');
+          emojiSpan.className = 'agent-emoji';
+          emojiSpan.textContent = '🛵';
+          this.agentElement.appendChild(emojiSpan);
+          
           this.container.appendChild(this.agentElement);
+          
+          // Add model badge if model name is set
+          this.updateAgentBadge();
         } else if (!this.isAnimating) {
           // 如果不在动画中，更新位置
           this.agentElement.style.left = `${screen.x}px`;

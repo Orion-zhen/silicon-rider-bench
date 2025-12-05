@@ -41,6 +41,30 @@ export interface ToolContext {
 }
 
 /**
+ * Format time as HH:mm
+ */
+function formatTimeHHMM(minutes: number): string {
+  const hours = Math.floor(minutes / 60) % 24;
+  const mins = minutes % 60;
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Format remaining time as "xx小时xx分钟"
+ */
+function formatRemainingTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours > 0 && mins > 0) {
+    return `${hours}小时${mins}分钟`;
+  } else if (hours > 0) {
+    return `${hours}小时`;
+  } else {
+    return `${mins}分钟`;
+  }
+}
+
+/**
  * 获取智能体当前状态
  * 需求：4.1-4.5
  */
@@ -49,7 +73,7 @@ export const getMyStatusTool: ToolDefinition = {
   description: '获取智能体的当前状态，包括位置、电量、携带订单、重量、承载能力和当前时间',
   parameters: {},
   handler: async (_params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<GetMyStatusResponse>> => {
-    const { agentState, currentTime } = context;
+    const { agentState, currentTime, simulator } = context;
 
     const allOrders = agentState.getCarriedOrders();
     
@@ -78,6 +102,9 @@ export const getMyStatusTool: ToolDefinition = {
         deliveryLocation: order.deliveryLocation,
       }));
 
+    // Get remaining time from simulator
+    const remainingTime = simulator ? simulator.getGameClock().getRemainingTime() : 0;
+
     const response: GetMyStatusResponse = {
       position: agentState.getPosition(),
       battery: agentState.getBattery(),
@@ -87,6 +114,9 @@ export const getMyStatusTool: ToolDefinition = {
       totalWeight: agentState.getTotalWeight(),
       remainingCapacity: agentState.getRemainingCapacity(),
       currentTime,
+      formattedTime: formatTimeHHMM(currentTime),
+      remainingTime,
+      formattedRemainingTime: formatRemainingTime(remainingTime),
       profit: agentState.getProfit(),
     };
 

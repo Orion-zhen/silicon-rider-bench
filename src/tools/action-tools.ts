@@ -12,11 +12,31 @@ import {
   PickupFoodResponse,
   DeliverFoodResponse,
   SwapBatteryResponse,
+  GetReceiptsResponse,
+  PickupFoodByPhoneResponse,
+  WaitResponse,
+  ImageTransportMode,
 } from '../types';
 import { ToolDefinition } from './tool-registry';
 import { ToolContext } from './query-tools';
 import { MovementCalculator } from '../core/movement-calculator';
 import { calculatePayment } from '../core/penalty-calculator';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * Sanitize order object to remove sensitive V2 fields (phoneNumber, receiptImagePath)
+ * This prevents AI from seeing the phone number before analyzing the receipt image
+ */
+function sanitizeOrderForResponse(order: any): any {
+  const { phoneNumber, receiptImagePath, ...safeOrder } = order;
+  return safeOrder;
+}
 
 /**
  * 接受订单
@@ -79,11 +99,14 @@ export const acceptOrderTool: ToolDefinition = {
     // 添加到智能体的携带订单列表
     agentState.addOrder(acceptedOrder);
 
+    // V2 模式：移除敏感字段（phoneNumber, receiptImagePath），防止 AI 直接看到手机号
+    const safeOrder = sanitizeOrderForResponse(acceptedOrder);
+
     return {
       success: true,
       data: {
         success: true,
-        order: acceptedOrder,
+        order: safeOrder,
       },
     };
   },
@@ -404,7 +427,292 @@ export const swapBatteryTool: ToolDefinition = {
 };
 
 /**
- * 获取所有行动工具
+ * Get receipts at a location (V2 mode only)
+ * Returns receipt images for all orders that need to be picked up at the specified location
+ */
+export const getReceiptsTool: ToolDefinition = {
+  name: 'get_receipts',
+  description: '获取指定地点的外卖小票图片（V2 模式专用）。返回当前地点所有待取餐订单的小票图片，需要识别小票上的手机号来取餐。',
+  parameters: {
+    targetLocationId: {
+      type: 'string',
+      required: true,
+      description: '目标地点 ID（取餐点）',
+    },
+  },
+  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<GetReceiptsResponse>> => {
+    const { agentState, nodes } = context;
+    const targetLocationId = params.targetLocationId as string;
+
+    // Validate location
+    if (!nodes.has(targetLocationId)) {
+      return {
+        success: false,
+        error: {
+          code: 'INVALID_LOCATION',
+          message: `Invalid location: ${targetLocationId}`,
+          details: { targetLocationId },
+        },
+      };
+    }
+
+    // Check if agent is at the target location
+    const currentPosition = agentState.getPosition();
+    if (currentPosition !== targetLocationId) {
+      return {
+        success: false,
+        error: {
+          code: 'WRONG_LOCATION',
+          message: `Not at target location. Current: ${currentPosition}, Required: ${targetLocationId}`,
+          details: { currentPosition, targetLocationId },
+        },
+      };
+    }
+
+    // Find all carried orders that need to be picked up at this location
+    const carriedOrders = agentState.getCarriedOrders();
+    const ordersAtLocation = carriedOrders.filter(
+      order => order.pickupLocation === targetLocationId && !order.pickedUp && order.receiptImagePath
+    );
+
+    if (ordersAtLocation.length === 0) {
+      return {
+        success: false,
+        error: {
+          code: 'NO_RECEIPTS_AT_LOCATION',
+          message: `No pending receipts at location: ${targetLocationId}`,
+          details: { targetLocationId },
+        },
+      };
+    }
+
+    // Get image transport mode from environment
+    const imageTransportMode: ImageTransportMode = 
+      (process.env.IMAGE_TRANSPORT_MODE as ImageTransportMode) || 'base64';
+
+    // Build receipts response
+    const receipts: GetReceiptsResponse['receipts'] = [];
+    const dataDir = path.join(__dirname, '..', 'data', 'synthetic_receipt_data');
+
+    for (const order of ordersAtLocation) {
+      const imagePath = path.join(dataDir, order.receiptImagePath!);
+      const absolutePath = path.resolve(imagePath);
+      
+      let imageData: string | undefined;
+      
+      if (imageTransportMode === 'base64') {
+        // Read image and encode as base64
+        if (fs.existsSync(absolutePath)) {
+          const imageBuffer = fs.readFileSync(absolutePath);
+          const base64Data = imageBuffer.toString('base64');
+          imageData = `data:image/jpeg;base64,${base64Data}`;
+        }
+      } else {
+        // Use file:// URL format
+        imageData = `file://${absolutePath}`;
+      }
+
+      receipts.push({
+        orderId: order.id,
+        imagePath: order.receiptImagePath!,
+        imageData,
+      });
+    }
+
+    return {
+      success: true,
+      data: {
+        receipts,
+        message: `Found ${receipts.length} receipt(s) at ${targetLocationId}. Please identify the phone numbers from the receipt images.`,
+      },
+    };
+  },
+};
+
+/**
+ * Pickup food by phone number (V2 mode only)
+ * AI must identify the phone number from the receipt image and provide it to pick up the order
+ */
+export const pickupFoodByPhoneTool: ToolDefinition = {
+  name: 'pickup_food_by_phone_number',
+  description: '通过手机号取餐（V2 模式专用）。需要先调用 get_receipts 获取小票图片，识别图片中的手机号，然后使用该手机号取餐。',
+  parameters: {
+    phoneNumber: {
+      type: 'string',
+      required: true,
+      description: '小票上的手机号（格式如 172****3882）',
+    },
+  },
+  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<PickupFoodByPhoneResponse>> => {
+    const { agentState } = context;
+    const phoneNumber = params.phoneNumber as string;
+
+    // Get current position
+    const currentPosition = agentState.getPosition();
+
+    // Find carried orders at current location that match the phone number
+    const carriedOrders = agentState.getCarriedOrders();
+    const matchingOrder = carriedOrders.find(
+      order => 
+        order.pickupLocation === currentPosition && 
+        !order.pickedUp && 
+        order.phoneNumber === phoneNumber
+    );
+
+    if (!matchingOrder) {
+      // Check if there are any orders at this location to provide better error message
+      const ordersAtLocation = carriedOrders.filter(
+        order => order.pickupLocation === currentPosition && !order.pickedUp
+      );
+
+      if (ordersAtLocation.length === 0) {
+        return {
+          success: false,
+          error: {
+            code: 'NO_RECEIPTS_AT_LOCATION',
+            message: `No pending orders at current location: ${currentPosition}`,
+            details: { currentPosition },
+          },
+        };
+      }
+
+      return {
+        success: false,
+        error: {
+          code: 'PHONE_NUMBER_NOT_MATCH',
+          message: `Phone number does not match any order at this location. Provided: ${phoneNumber}`,
+          details: { 
+            phoneNumber, 
+            currentPosition,
+            hint: 'Please check the receipt image again for the correct phone number.',
+          },
+        },
+      };
+    }
+
+    // Mark order as picked up
+    agentState.markOrderPickedUp(matchingOrder.id);
+
+    // Pickup takes 2 minutes
+    const timeCost = 2;
+
+    return {
+      success: true,
+      data: {
+        success: true,
+        timeCost,
+        orderId: matchingOrder.id,
+        message: `Successfully picked up order ${matchingOrder.id} using phone number ${phoneNumber}`,
+      },
+    };
+  },
+};
+
+/**
+ * 等待（跳过时间）
+ * 用于等待新订单生成或时间推进
+ */
+export const waitTool: ToolDefinition = {
+  name: 'wait',
+  description: '等待指定的分钟数，跳过时间。在等待期间会生成新订单并移除过期订单。',
+  parameters: {
+    minutes: {
+      type: 'number',
+      required: true,
+      description: '等待的分钟数（1-60）',
+      min: 1,
+      max: 60,
+    },
+  },
+  handler: async (params: Record<string, any>, context: ToolContext): Promise<ToolCallResponse<WaitResponse>> => {
+    const { simulator } = context;
+    const minutes = params.minutes as number;
+
+    // Validate minutes parameter
+    if (!minutes || minutes < 1) {
+      return {
+        success: false,
+        error: {
+          code: 'INVALID_PARAMETER',
+          message: 'Minutes must be at least 1',
+          details: { minutes },
+        },
+      };
+    }
+
+    if (minutes > 60) {
+      return {
+        success: false,
+        error: {
+          code: 'INVALID_PARAMETER',
+          message: 'Minutes cannot exceed 60',
+          details: { minutes },
+        },
+      };
+    }
+
+    // Check if simulator is available
+    if (!simulator) {
+      return {
+        success: false,
+        error: {
+          code: 'INVALID_PARAMETER',
+          message: 'Simulator not available in context',
+          details: {},
+        },
+      };
+    }
+
+    // Get previous time
+    const previousTime = simulator.getCurrentTime();
+
+    // Get order counts before wait
+    const ordersBefore = simulator.getAvailableOrders().length;
+
+    // Advance game clock
+    const gameClock = simulator.getGameClock();
+    gameClock.advance(minutes);
+
+    // Generate new orders and remove expired ones
+    // Call advanceSimulation multiple times based on minutes to generate more orders
+    const advanceCount = Math.max(1, Math.floor(minutes / 5)); // At least once, more for longer waits
+    for (let i = 0; i < advanceCount; i++) {
+      simulator.advanceSimulation();
+    }
+
+    // Get current time and order counts after wait
+    const currentTime = simulator.getCurrentTime();
+    const ordersAfter = simulator.getAvailableOrders().length;
+    
+    // Calculate changes (approximate)
+    const newOrdersGenerated = Math.max(0, ordersAfter - ordersBefore);
+
+    return {
+      success: true,
+      data: {
+        success: true,
+        timeCost: minutes,
+        previousTime,
+        currentTime,
+        newOrdersGenerated,
+        expiredOrders: 0, // We don't have exact count, simulator handles it internally
+        message: `Waited ${minutes} minutes. Time advanced from ${formatTime(previousTime)} to ${formatTime(currentTime)}.`,
+      },
+    };
+  },
+};
+
+/**
+ * Helper function to format time
+ */
+function formatTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60) % 24;
+  const mins = minutes % 60;
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+}
+
+/**
+ * 获取所有行动工具 (V1 mode)
  */
 export function getActionTools(): ToolDefinition[] {
   return [
@@ -413,5 +721,22 @@ export function getActionTools(): ToolDefinition[] {
     pickupFoodTool,
     deliverFoodTool,
     swapBatteryTool,
+    waitTool,
+  ];
+}
+
+/**
+ * 获取 V2 模式的行动工具
+ * 不包含 pickup_food，增加 get_receipts 和 pickup_food_by_phone_number
+ */
+export function getActionToolsV2(): ToolDefinition[] {
+  return [
+    acceptOrderTool,
+    moveToTool,
+    getReceiptsTool,
+    pickupFoodByPhoneTool,
+    deliverFoodTool,
+    swapBatteryTool,
+    waitTool,
   ];
 }

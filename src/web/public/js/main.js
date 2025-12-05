@@ -2,9 +2,10 @@
  * Silicon Rider Bench - Web Visualization
  * Main Client Logic
  * 
- * Handles WebSocket connection, message routing, and connection state management
+ * Handles WebSocket connection, message routing, and application state management.
+ * Uses DataStore for centralized data management.
  * 
- * Version: 1.1.0 - Fixed undefined toFixed() error
+ * Version: 2.0.0 - Tab Navigation & DataStore Architecture
  */
 
 // ============================================================================
@@ -17,16 +18,13 @@ class ConnectionManager {
     this.connected = false;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
-    this.reconnectDelay = 1000; // Start with 1 second
-    this.maxReconnectDelay = 30000; // Max 30 seconds
+    this.reconnectDelay = 1000;
+    this.maxReconnectDelay = 30000;
     this.reconnectTimer = null;
     this.messageHandlers = new Map();
     this.connectionStateCallbacks = [];
   }
 
-  /**
-   * Connect to WebSocket server
-   */
   connect() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
@@ -42,9 +40,6 @@ class ConnectionManager {
     }
   }
 
-  /**
-   * Setup WebSocket event handlers
-   */
   setupEventHandlers() {
     this.ws.onopen = () => {
       console.log('[WebSocket] Connected');
@@ -71,9 +66,6 @@ class ConnectionManager {
     };
   }
 
-  /**
-   * Handle incoming WebSocket message
-   */
   handleMessage(data) {
     try {
       const message = JSON.parse(data);
@@ -83,7 +75,6 @@ class ConnectionManager {
         return;
       }
 
-      // Route message to registered handlers
       const handlers = this.messageHandlers.get(message.type);
       if (handlers && handlers.length > 0) {
         handlers.forEach(handler => {
@@ -101,9 +92,6 @@ class ConnectionManager {
     }
   }
 
-  /**
-   * Register a message handler for a specific message type
-   */
   on(messageType, handler) {
     if (!this.messageHandlers.has(messageType)) {
       this.messageHandlers.set(messageType, []);
@@ -111,16 +99,10 @@ class ConnectionManager {
     this.messageHandlers.get(messageType).push(handler);
   }
 
-  /**
-   * Register a connection state change callback
-   */
   onConnectionStateChange(callback) {
     this.connectionStateCallbacks.push(callback);
   }
 
-  /**
-   * Notify all connection state callbacks
-   */
   notifyConnectionState(connected, reconnecting = false) {
     this.connectionStateCallbacks.forEach(callback => {
       try {
@@ -131,25 +113,18 @@ class ConnectionManager {
     });
   }
 
-  /**
-   * Handle connection error
-   */
   handleConnectionError() {
     this.connected = false;
     this.notifyConnectionState(false);
   }
 
-  /**
-   * Attempt to reconnect with exponential backoff
-   */
   attemptReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[WebSocket] Max reconnection attempts reached. Please refresh the page to try again.');
+      console.error('[WebSocket] Max reconnection attempts reached.');
       this.notifyConnectionState(false);
       return;
     }
 
-    // Clear any existing reconnect timer
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
@@ -161,8 +136,6 @@ class ConnectionManager {
     );
 
     console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-
-    // Notify that we're reconnecting
     this.notifyConnectionState(false, true);
 
     this.reconnectTimer = setTimeout(() => {
@@ -171,9 +144,6 @@ class ConnectionManager {
     }, delay);
   }
 
-  /**
-   * Send a message to the server
-   */
   send(message) {
     if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn('[WebSocket] Cannot send message: not connected');
@@ -189,9 +159,6 @@ class ConnectionManager {
     }
   }
 
-  /**
-   * Close the connection
-   */
   close() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -206,59 +173,8 @@ class ConnectionManager {
     this.connected = false;
   }
 
-  /**
-   * Get connection status
-   */
   isConnected() {
     return this.connected;
-  }
-}
-
-// ============================================================================
-// UI State Management
-// ============================================================================
-
-class UIManager {
-  constructor() {
-    this.connectionIndicator = null;
-    this.mapContainer = null;
-    this.statsContainer = null;
-    this.chatContainer = null;
-  }
-
-  /**
-   * Initialize UI elements
-   */
-  initialize() {
-    this.mapContainer = document.getElementById('map-container');
-    this.statsContainer = document.getElementById('stats-panel');
-    this.chatContainer = document.getElementById('chat-panel');
-
-    if (!this.mapContainer) {
-      console.error('[UI] Map container element not found');
-    }
-    if (!this.statsContainer) {
-      console.error('[UI] Stats container element not found');
-    }
-    if (!this.chatContainer) {
-      console.error('[UI] Chat container element not found');
-    }
-  }
-
-  /**
-   * Update connection status indicator (now in stats panel)
-   */
-  updateConnectionStatus(connected, reconnecting = false) {
-    // Connection status is now managed by StatsPanel
-    // We'll update it through the app's statsPanel reference
-  }
-
-  /**
-   * Show error message
-   */
-  showError(message) {
-    console.error('[UI] Error:', message);
-    // Could add a toast notification or error banner here
   }
 }
 
@@ -269,14 +185,14 @@ class UIManager {
 class Application {
   constructor() {
     this.connectionManager = new ConnectionManager();
-    this.uiManager = new UIManager();
+    this.tabNav = null;
+    this.pageRouter = null;
     this.mapRenderer = null;
     this.statsPanel = null;
     this.chatPanel = null;
+    this.agentDetailPage = null;
     this.pendingSonarToolName = null;
     this.pendingPanelData = [];
-    this.modelName = 'AI';
-    this.totalToolCalls = 0; // Cumulative tool call counter
     
     // Tool name to Chinese mapping
     this.toolNameMap = {
@@ -292,21 +208,33 @@ class Application {
       'get_location_info': '查询位置信息',
       'calculate_distance': '计算距离',
       'estimate_time': '估算时间',
+      'wait': '等待',
     };
   }
 
-  /**
-   * Initialize the application
-   */
   initialize() {
-    console.log('[App] Initializing Silicon Rider Bench Web Visualization...');
+    console.log('[App] Initializing Silicon Rider Bench Web Visualization v2.0...');
 
-    // Initialize UI
-    this.uiManager.initialize();
+    // Initialize Tab Navigation
+    const tabNavContainer = document.querySelector('.tab-navigation');
+    if (tabNavContainer && typeof TabNav !== 'undefined') {
+      this.tabNav = new TabNav(tabNavContainer);
+      this.tabNav.onTabChanged((tabId) => this.handleTabChange(tabId));
+    }
+
+    // Initialize Page Router
+    const pageContainer = document.querySelector('.page-container');
+    if (pageContainer && typeof PageRouter !== 'undefined') {
+      this.pageRouter = new PageRouter(pageContainer);
+      this.registerPages();
+      // Navigate to initial page
+      this.pageRouter.navigateTo('homepage');
+    }
 
     // Setup connection state handler
     this.connectionManager.onConnectionStateChange((connected, reconnecting) => {
-      this.updateConnectionStatusInStats(connected, reconnecting);
+      dataStore.updateConnectionStatus(connected, reconnecting);
+      this.updateConnectionStatusUI(connected, reconnecting);
     });
 
     // Register message handlers
@@ -317,48 +245,246 @@ class Application {
   }
 
   /**
+   * Register all pages with the router
+   */
+  registerPages() {
+    // Homepage
+    this.pageRouter.registerPage('homepage', {
+      title: 'Homepage',
+      render: () => `
+        <!-- Statistics Panel (Top - Horizontal with Header) -->
+        <section class="stats-panel">
+          <!-- Header Section -->
+          <div class="header-section">
+            <div class="header-content">
+              <h1>🛵 Silicon Rider Bench</h1>
+              <a href="https://github.com/KCORES/silicon-rider-bench" target="_blank" class="github-link">
+                github.com/KCORES/silicon-rider-bench
+              </a>
+            </div>
+          </div>
+          
+          <!-- Stats Content -->
+          <div id="stats-panel" class="stats-content">
+            <!-- Stats will be rendered here by JavaScript -->
+          </div>
+        </section>
+
+        <!-- Main Content Area -->
+        <div class="container">
+          <div class="content-wrapper">
+            <!-- Map Area (Left - 50%) -->
+            <main class="main-content">
+              <div id="map-container" class="map-container">
+                <!-- Map will be rendered here by JavaScript -->
+              </div>
+            </main>
+
+            <!-- Conversation Panel (Right - 50%) -->
+            <aside id="chat-panel" class="chat-panel">
+              <!-- Chat will be rendered here by JavaScript -->
+            </aside>
+          </div>
+        </div>
+      `,
+      init: (pageElement) => {
+        // Initialize homepage components
+        const mapContainer = pageElement.querySelector('#map-container');
+        const statsContainer = pageElement.querySelector('#stats-panel');
+        const chatContainer = pageElement.querySelector('#chat-panel');
+
+        // Initialize map renderer
+        if (typeof MapRenderer !== 'undefined' && mapContainer) {
+          this.mapRenderer = new MapRenderer(mapContainer);
+          
+          // If we have init data, initialize the map
+          const state = dataStore.getState();
+          if (state.nodes.length > 0) {
+            this.mapRenderer.initialize(state.nodes, state.edges);
+            
+            // Set model name for agent badge
+            if (state.modelName) {
+              this.mapRenderer.setModelName(state.modelName);
+            }
+            
+            this.mapRenderer.render();
+            
+            // Update agent position if available
+            if (state.agentState.position) {
+              this.mapRenderer.updateAgentPosition(state.agentState.position);
+              this.mapRenderer.render();
+            }
+          }
+        }
+
+        // Initialize stats panel
+        if (typeof StatsPanel !== 'undefined' && statsContainer) {
+          this.statsPanel = new StatsPanel(statsContainer);
+          
+          // Set model name if available
+          const modelName = dataStore.get('modelName');
+          if (modelName) {
+            this.statsPanel.setModelName(modelName);
+          }
+          
+          // Update with current data
+          const state = dataStore.getState();
+          this.statsPanel.update(
+            state.agentState,
+            state.formattedTime,
+            state.currentIteration,
+            state.maxIterations,
+            state.lastTotalTokens,
+            state.cumulativeTotalTokens,
+            state.currentTime
+          );
+          this.statsPanel.updateToolCalls(state.totalToolCalls);
+        }
+
+        // Initialize chat panel
+        if (typeof ChatPanel !== 'undefined' && chatContainer) {
+          this.chatPanel = new ChatPanel(chatContainer);
+          
+          // Replay existing conversations
+          const conversations = dataStore.get('conversations') || [];
+          conversations.forEach(item => {
+            if (item.type === 'message') {
+              this.chatPanel.addMessage(item.role, item.content);
+            } else if (item.type === 'tool_call') {
+              this.chatPanel.addToolCall(item.toolName, item.arguments);
+            } else if (item.type === 'tool_result') {
+              this.chatPanel.addToolResult(item.toolName, item.success, item.result);
+            }
+          });
+        }
+
+        // Update connection status
+        const state = dataStore.getState();
+        this.updateConnectionStatusUI(state.connected, state.reconnecting);
+
+        return { mapRenderer: this.mapRenderer, statsPanel: this.statsPanel, chatPanel: this.chatPanel };
+      },
+      update: (instance, dataType, data) => {
+        // This is called when navigating back to homepage
+        // Refresh all components with current data
+        if (this.statsPanel) {
+          const state = dataStore.getState();
+          this.statsPanel.update(
+            state.agentState,
+            state.formattedTime,
+            state.currentIteration,
+            state.maxIterations,
+            state.lastTotalTokens,
+            state.cumulativeTotalTokens,
+            state.currentTime
+          );
+          this.statsPanel.updateToolCalls(state.totalToolCalls);
+        }
+      },
+      cleanup: () => {
+        // Cleanup if needed
+      }
+    });
+
+    // Agent Detail Page
+    this.pageRouter.registerPage('agent-detail', {
+      title: 'Agent Detail',
+      render: () => {
+        if (typeof renderAgentDetailPage !== 'undefined') {
+          return renderAgentDetailPage();
+        }
+        return '<div class="agent-detail-page"><p>Loading...</p></div>';
+      },
+      init: (pageElement) => {
+        if (typeof AgentDetailPage !== 'undefined') {
+          this.agentDetailPage = new AgentDetailPage(pageElement, dataStore);
+          return this.agentDetailPage;
+        }
+        return null;
+      },
+      update: (instance) => {
+        if (instance && instance.updateFromDataStore) {
+          instance.updateFromDataStore();
+        }
+      },
+      cleanup: () => {
+        if (this.agentDetailPage && this.agentDetailPage.cleanup) {
+          this.agentDetailPage.cleanup();
+        }
+      }
+    });
+
+    // Settings Page
+    this.pageRouter.registerPage('settings', {
+      title: 'Settings',
+      render: () => {
+        if (typeof renderSettingsPage !== 'undefined') {
+          return renderSettingsPage();
+        }
+        return '<div class="settings-page"><p>Loading...</p></div>';
+      },
+      init: (pageElement) => {
+        if (typeof SettingsPage !== 'undefined') {
+          this.settingsPage = new SettingsPage(pageElement);
+          return this.settingsPage;
+        }
+        return null;
+      },
+      update: (instance) => {
+        // Settings page doesn't need data updates
+      },
+      cleanup: () => {
+        if (this.settingsPage && this.settingsPage.cleanup) {
+          this.settingsPage.cleanup();
+        }
+      }
+    });
+  }
+
+  /**
+   * Handle tab change
+   * @param {string} tabId - New tab ID
+   */
+  handleTabChange(tabId) {
+    if (this.pageRouter) {
+      this.pageRouter.navigateTo(tabId);
+    }
+  }
+
+  /**
    * Register handlers for different message types
    */
   registerMessageHandlers() {
-    // Handle initialization message
     this.connectionManager.on('init', (message) => {
       this.handleInit(message.data);
     });
 
-    // Handle state updates
     this.connectionManager.on('state_update', (message) => {
       this.handleStateUpdate(message.data);
     });
 
-    // Handle conversation messages
     this.connectionManager.on('conversation', (message) => {
       this.handleConversation(message.data);
     });
 
-    // Handle reasoning messages (from thinking models)
     this.connectionManager.on('reasoning', (message) => {
       this.handleReasoning(message.data);
     });
 
-    // Handle tool calls
     this.connectionManager.on('tool_call', (message) => {
       this.handleToolCall(message.data);
     });
 
-    // Handle tool results
     this.connectionManager.on('tool_result', (message) => {
       this.handleToolResult(message.data);
     });
 
-    // Handle simulation end
     this.connectionManager.on('simulation_end', (message) => {
       this.handleSimulationEnd(message.data);
     });
 
-    // Handle errors
     this.connectionManager.on('error', (message) => {
       console.error('[App] Server error:', message.data);
-      this.uiManager.showError(message.data.message);
     });
   }
 
@@ -366,45 +492,39 @@ class Application {
    * Handle initialization message
    */
   handleInit(data) {
-    // Initialize map renderer when available
-    if (typeof MapRenderer !== 'undefined' && this.uiManager.mapContainer) {
-      this.mapRenderer = new MapRenderer(this.uiManager.mapContainer);
-      this.mapRenderer.initialize(data.nodes, data.edges);
-      this.mapRenderer.render();
-    } else {
-      console.warn('[App] MapRenderer not available or container not found');
-    }
+    // Update data store
+    dataStore.handleInit(data);
 
-    // Initialize stats panel when available
-    if (typeof StatsPanel !== 'undefined' && this.uiManager.statsContainer) {
-      this.statsPanel = new StatsPanel(this.uiManager.statsContainer);
+    // Initialize map renderer if on homepage
+    if (this.mapRenderer) {
+      this.mapRenderer.initialize(data.nodes, data.edges);
       
-      // Set model name if available in config
+      // Set model name for agent badge
       if (data.config && data.config.modelName) {
-        this.statsPanel.setModelName(data.config.modelName);
-        this.modelName = data.config.modelName;
+        this.mapRenderer.setModelName(data.config.modelName);
       }
       
-      // Update connection status now that stats panel is initialized
-      this.updateConnectionStatusInStats(this.connectionManager.isConnected(), false);
-    } else {
-      console.warn('[App] StatsPanel not available or container not found');
+      this.mapRenderer.render();
     }
 
-    // Initialize chat panel when available
-    if (typeof ChatPanel !== 'undefined' && this.uiManager.chatContainer) {
-      this.chatPanel = new ChatPanel(this.uiManager.chatContainer);
-    } else {
-      console.warn('[App] ChatPanel not available or container not found');
+    // Update stats panel
+    if (this.statsPanel && data.config && data.config.modelName) {
+      this.statsPanel.setModelName(data.config.modelName);
     }
+
+    // Update connection status
+    this.updateConnectionStatusUI(this.connectionManager.isConnected(), false);
   }
 
   /**
    * Handle state update message
    */
   handleStateUpdate(data) {
+    // Update data store
+    dataStore.handleStateUpdate(data);
+
     // Update map renderer
-    if (this.mapRenderer) {
+    if (this.mapRenderer && data.agentState) {
       this.mapRenderer.updateAgentPosition(data.agentState.position);
       this.mapRenderer.render();
     }
@@ -412,7 +532,7 @@ class Application {
     // Update stats panel
     if (this.statsPanel) {
       this.statsPanel.update(
-        data.agentState, 
+        data.agentState,
         data.formattedTime,
         data.currentIteration,
         data.maxIterations,
@@ -427,44 +547,50 @@ class Application {
    * Handle conversation message
    */
   handleConversation(data) {
+    // Update data store
+    dataStore.handleConversation(data);
+
     // Show action panel for assistant messages
     if (data.role === 'assistant' && data.content && this.mapRenderer) {
-      // Truncate long content
       let displayContent = data.content;
       if (displayContent.length > 100) {
         displayContent = displayContent.substring(0, 100) + '...';
       }
       
-      const actionText = `${this.modelName}: ${displayContent}`;
+      const modelName = dataStore.get('modelName');
+      const actionText = `${modelName}: ${displayContent}`;
       this.mapRenderer.showActionPanel(actionText, 'conversation');
     }
     
+    // Update chat panel
     if (this.chatPanel) {
       this.chatPanel.addMessage(data.role, data.content);
     }
   }
 
   /**
-   * Handle reasoning message (from thinking models)
+   * Handle reasoning message
    */
   handleReasoning(data) {
-    console.log('[App] Reasoning content received:', data.content);
+    // Update data store
+    dataStore.handleReasoning(data);
     
     // Show reasoning panel
     if (data.content && this.mapRenderer) {
-      // Truncate long reasoning content
       let displayContent = data.content;
       if (displayContent.length > 150) {
         displayContent = displayContent.substring(0, 150) + '...';
       }
       
-      const reasoningText = `${this.modelName} 💭: ${displayContent}`;
+      const modelName = dataStore.get('modelName');
+      const reasoningText = `${modelName} 💭: ${displayContent}`;
       this.mapRenderer.showActionPanel(reasoningText, 'reasoning');
     }
     
-    // Also add to chat panel if available
+    // Update chat panel
     if (this.chatPanel) {
-      this.chatPanel.addMessage('system', `💭 ${this.modelName} 思考过程:\n${data.content}`);
+      const modelName = dataStore.get('modelName');
+      this.chatPanel.addMessage('system', `💭 ${modelName} 思考过程:\n${data.content}`);
     }
   }
 
@@ -472,28 +598,23 @@ class Application {
    * Handle tool call message
    */
   handleToolCall(data) {
-    console.log('[App] handleToolCall called:', data.toolName, 'mapRenderer exists:', !!this.mapRenderer);
+    // Update data store
+    dataStore.handleToolCall(data);
     
-    // Increment tool call counter (note: one message may contain multiple tool calls)
-    // Each call to handleToolCall represents one tool call
-    this.totalToolCalls++;
-    
-    // Update stats panel with new tool call count
+    // Update stats panel
     if (this.statsPanel) {
-      this.statsPanel.updateToolCalls(this.totalToolCalls);
+      this.statsPanel.updateToolCalls(dataStore.get('totalToolCalls'));
     }
     
     // Show action panel for tool call
     if (this.mapRenderer) {
       const toolNameChinese = this.toolNameMap[data.toolName] || data.toolName;
       const argsStr = JSON.stringify(data.arguments || {});
-      
-      // Create HTML with badge for action name
       const actionHtml = `<span class="tool-action-badge">${toolNameChinese}</span> 调用 tool ${data.toolName}(${argsStr})`;
       
       this.mapRenderer.showActionPanel(actionHtml, 'tool-call');
       
-      // Show critical hit animation for specific actions
+      // Show critical hit animation
       const criticalHitMap = {
         'pickup_food': '➕🍱',
         'deliver_food': '➖🍱',
@@ -502,28 +623,18 @@ class Application {
       };
       
       if (criticalHitMap[data.toolName]) {
-        console.log('[App] ✨ Tool matches critical hit map:', data.toolName, '→', criticalHitMap[data.toolName]);
-        console.log('[App] Agent position:', this.mapRenderer.agentPosition);
-        console.log('[App] Agent element exists:', !!this.mapRenderer.agentElement);
         this.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName]);
-      } else {
-        console.log('[App] Tool does NOT match critical hit map:', data.toolName);
       }
-    } else {
-      console.warn('[App] mapRenderer not available for tool call:', data.toolName);
     }
     
     // Show sonar animation for search tools
     if ((data.toolName === 'search_nearby_orders' || data.toolName === 'search_nearby_battery_stations') && this.mapRenderer) {
-      // Extract radius from arguments
       const radius = data.arguments && data.arguments.radius ? data.arguments.radius : 10;
-      
-      // Store the tool name to handle panels after animation
       this.pendingSonarToolName = data.toolName;
-      
       this.mapRenderer.showSonarAnimation(radius);
     }
     
+    // Update chat panel
     if (this.chatPanel) {
       this.chatPanel.addToolCall(data.toolName, data.arguments);
     }
@@ -533,22 +644,17 @@ class Application {
    * Handle tool result message
    */
   handleToolResult(data) {
+    // Update data store
+    dataStore.handleToolResult(data);
+    
     // Show search result panels for search tools
     if (data.success && this.mapRenderer) {
-      // 后端返回格式是 {success: true, data: {orders: [...]} }
       const resultData = data.result && data.result.data ? data.result.data : data.result;
       
-      // Debug log for path-related tools
-      if (data.toolName === 'calculate_distance' || data.toolName === 'estimate_time') {
-        console.log('[App] Tool result data:', data.toolName, resultData);
-      }
-      
       if (data.toolName === 'search_nearby_orders' && resultData && resultData.orders) {
-        // Collect panel data
         const panelDataList = [];
         resultData.orders.forEach((order) => {
           if (order.pickupLocation) {
-            // Format deadline time
             let deadlineStr = 'N/A';
             if (order.estimatedTimeLimit) {
               deadlineStr = `${order.estimatedTimeLimit}分钟`;
@@ -566,11 +672,9 @@ class Application {
           }
         });
         
-        // Wait for sonar animation to complete before showing panels
         this.showPanelsAfterSonar(panelDataList);
         
       } else if (data.toolName === 'search_nearby_battery_stations' && resultData && resultData.stations) {
-        // Collect panel data
         const panelDataList = [];
         resultData.stations.forEach((station) => {
           if (station.id) {
@@ -584,11 +688,9 @@ class Application {
           }
         });
         
-        // Wait for sonar animation to complete before showing panels
         this.showPanelsAfterSonar(panelDataList);
         
       } else if (data.toolName === 'get_location_info' && resultData && resultData.id) {
-        // Show location info panel at the target location (non-blocking, with 0.5s delay)
         setTimeout(() => {
           this.mapRenderer.showLocationInfoPanel(resultData.id, {
             name: resultData.name || 'Unknown',
@@ -598,9 +700,7 @@ class Application {
         }, 500);
         
       } else if (data.toolName === 'calculate_distance' && resultData && resultData.path) {
-        // Show path animation with green color (non-blocking, with 0.5s delay)
         setTimeout(() => {
-          // Safely extract distance with default
           const distance = typeof resultData.distance === 'number' ? resultData.distance : 0;
           
           this.mapRenderer.showPathAnimation(
@@ -613,25 +713,17 @@ class Application {
         }, 500);
         
       } else if (data.toolName === 'estimate_time' && resultData) {
-        console.log('[App] 🔵 estimate_time result data:', resultData);
-        console.log('[App] Has segments:', !!resultData.segments);
-        
         if (resultData.segments) {
-          // Show path animation with blue color (non-blocking, with 0.5s delay)
           setTimeout(() => {
-            // Extract complete path from segments
             const path = [];
             let totalDistance = 0;
             
             if (resultData.segments && resultData.segments.length > 0) {
-              // Merge all segment paths into one complete path
               resultData.segments.forEach((segment, index) => {
                 if (segment.path && segment.path.length > 0) {
                   if (index === 0) {
-                    // First segment: add all nodes
                     path.push(...segment.path);
                   } else {
-                    // Subsequent segments: skip first node (already added as last node of previous segment)
                     path.push(...segment.path.slice(1));
                   }
                 }
@@ -639,16 +731,9 @@ class Application {
               });
             }
             
-            // Safely extract time with default
             const totalTime = typeof resultData.totalTime === 'number' ? resultData.totalTime : 0;
             
-            console.log('[App] 🔵 estimate_time extracted path:', path);
-            console.log('[App] 🔵 Path length:', path.length);
-            console.log('[App] 🔵 Total distance:', totalDistance, 'km');
-            console.log('[App] 🔵 Total time:', totalTime, 'min');
-            
             if (path.length >= 2) {
-              console.log('[App] 🔵 Calling showPathAnimation with blue color');
               this.mapRenderer.showPathAnimation(
                 path,
                 'blue',
@@ -657,16 +742,13 @@ class Application {
                   distance: totalDistance.toFixed(2) + ' km'
                 }
               );
-            } else {
-              console.warn('[App] ⚠️  Path too short, not showing animation. Path:', path);
             }
           }, 500);
-        } else {
-          console.warn('[App] ⚠️  estimate_time result has no segments');
         }
       }
     }
     
+    // Update chat panel
     if (this.chatPanel) {
       this.chatPanel.addToolResult(data.toolName, data.success, data.result);
     }
@@ -676,32 +758,26 @@ class Application {
    * Show panels after sonar animation completes
    */
   showPanelsAfterSonar(panelDataList) {
-    // Check if sonar is currently animating
+    if (!this.mapRenderer) return;
+    
     if (this.mapRenderer.isSonarAnimating) {
-      // Wait and check again
       setTimeout(() => {
         this.showPanelsAfterSonar(panelDataList);
       }, 100);
     } else {
-      // Calculate distances and sort by distance (closest first)
       const panelsWithDistance = panelDataList.map(panelData => {
         const distance = this.mapRenderer.calculateDistanceToAgent(panelData.locationId);
         return { ...panelData, distance };
       });
       
-      // Sort by distance (ascending - closest first)
       panelsWithDistance.sort((a, b) => a.distance - b.distance);
       
-      // Show panels with delay based on distance order
-      const delayBetweenPanels = 150; // 150ms between each panel
+      const delayBetweenPanels = 150;
       
       panelsWithDistance.forEach((panelData, index) => {
         const delay = index * delayBetweenPanels;
         
         setTimeout(() => {
-          // Calculate auto-hide duration: closer panels disappear sooner
-          // Base duration: 10 seconds
-          // Closest panel: 10s, furthest panel: 10s + (count-1) * 1s
           const autoHideDuration = 10000 + (index * 1000);
           
           this.mapRenderer.showSearchResultPanel(
@@ -719,31 +795,34 @@ class Application {
    * Handle simulation end message
    */
   handleSimulationEnd(data) {
+    // Update data store
+    dataStore.handleSimulationEnd(data);
+    
+    // Update chat panel
     if (this.chatPanel) {
       this.chatPanel.addMessage('system', `Simulation completed!\n\nFinal Report:\n${data.report}`);
     }
   }
   
   /**
-   * Update connection status in stats panel
+   * Update connection status in UI
    */
-  updateConnectionStatusInStats(connected, reconnecting = false) {
-    if (!this.statsPanel || !this.statsPanel.elements || !this.statsPanel.elements.connectionStatus) {
-      return;
-    }
-    
-    const statusElement = this.statsPanel.elements.connectionStatus;
-    const statusText = statusElement.querySelector('.status-text');
-    
-    if (connected) {
-      if (statusText) statusText.textContent = 'Connected';
-      statusElement.className = 'connection-status connected';
-    } else if (reconnecting) {
-      if (statusText) statusText.textContent = 'Reconnecting...';
-      statusElement.className = 'connection-status reconnecting';
-    } else {
-      if (statusText) statusText.textContent = 'Disconnected';
-      statusElement.className = 'connection-status disconnected';
+  updateConnectionStatusUI(connected, reconnecting = false) {
+    // Update stats panel if available
+    if (this.statsPanel && this.statsPanel.elements && this.statsPanel.elements.connectionStatus) {
+      const statusElement = this.statsPanel.elements.connectionStatus;
+      const statusText = statusElement.querySelector('.status-text');
+      
+      if (connected) {
+        if (statusText) statusText.textContent = 'Connected';
+        statusElement.className = 'connection-status connected';
+      } else if (reconnecting) {
+        if (statusText) statusText.textContent = 'Reconnecting...';
+        statusElement.className = 'connection-status reconnecting';
+      } else {
+        if (statusText) statusText.textContent = 'Disconnected';
+        statusElement.className = 'connection-status disconnected';
+      }
     }
   }
 }
@@ -759,7 +838,6 @@ if (document.readyState === 'loading') {
     window.app.initialize();
   });
 } else {
-  // DOM already loaded
   window.app = new Application();
   window.app.initialize();
 }

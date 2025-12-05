@@ -28,12 +28,13 @@ export function getToolCallFormat(): ToolCallFormat {
 
 /**
  * 获取最大迭代次数（从环境变量读取）
+ * 返回 0 表示无限循环
  */
 function getMaxIterations(): number {
   const envValue = process.env.MAX_ITERATIONS;
-  if (envValue) {
+  if (envValue !== undefined && envValue !== '') {
     const parsed = parseInt(envValue, 10);
-    if (!isNaN(parsed) && parsed > 0) {
+    if (!isNaN(parsed) && parsed >= 0) {
       return parsed;
     }
   }
@@ -152,49 +153,10 @@ function generateOpenAIToolCallInstructions(): string {
 }
 
 /**
- * 生成系统提示词
- * 
- * 这个函数被用于：
- * 1. 初始化对话时的系统消息
- * 2. help 工具调用返回的帮助信息
- * 
- * @param simulator 模拟器实例
- * @param currentIteration 当前对话轮次（可选，用于动态更新）
- * @returns 系统提示词
+ * 生成 V1 版本的工具说明
  */
-export function generateSystemPrompt(simulator: Simulator, currentIteration?: number): string {
-  const isLevel01 = simulator.isLevel01Mode();
-  const agentState = simulator.getAgentState();
-  const maxIterations = getMaxIterations();
-  const toolCallFormat = getToolCallFormat();
-
-  // 根据格式生成对应的 tool call 说明
-  let toolCallInstructions = '';
-  switch (toolCallFormat) {
-    case 'mcp':
-      toolCallInstructions = generateMCPToolCallInstructions();
-      break;
-    case 'sglang':
-      toolCallInstructions = generateSGLangToolCallInstructions();
-      break;
-    case 'openai':
-    default:
-      toolCallInstructions = generateOpenAIToolCallInstructions();
-      break;
-  }
-
-  // 静态部分 - 放在前面以最大化 KV Cache 复用
-  const staticPrompt = `
-# Silicon Rider Bench - AI 外卖骑手模拟
-
-你是一个 AI 外卖骑手，在虚拟城市中配送订单以赚取利润。
-
-## 目标
-${isLevel01 
-  ? '完成单个配送订单，验证基本功能。' 
-  : '在有限时间和轮次内最大化利润。'
-}
-${toolCallInstructions}
+function generateV1ToolsPrompt(): string {
+  return `
 ## 可用工具
 你可以调用以下工具来完成配送任务, 一次对话支持同时调用多个工具, 但是工具调用的先后顺序有区别, 请根据实际情况选择：
 
@@ -214,7 +176,48 @@ ${toolCallInstructions}
 - **pickup_food(orderId)**: 在取餐点取餐（耗时 2 分钟）
 - **deliver_food(orderId)**: 在送餐点送餐（耗时 1 分钟）
 - **swap_battery()**: 在换电站换电（耗时 1 分钟，花费 0.5 元）
+- **wait(minutes)**: 等待指定分钟数（1-60），在此期间会生成新订单`;
+}
 
+/**
+ * 生成 V2 版本的工具说明（多模态取餐）
+ */
+function generateV2ToolsPrompt(): string {
+  return `
+## 可用工具
+你可以调用以下工具来完成配送任务, 一次对话支持同时调用多个工具, 但是工具调用的先后顺序有区别, 请根据实际情况选择：
+
+### 信息查询类
+- **get_my_status()**: 查询当前状态（位置、电量、订单、利润等）
+- **get_map()**: 获取完整地图信息（位置列表按类型分组 + 邻接表连接关系）
+- **search_nearby_orders(radius)**: 搜索指定半径内的可用订单
+- **search_nearby_battery_stations(radius)**: 搜索指定半径内的换电站
+- **get_location_info(locationId)**: 获取位置详细信息（包括相邻位置和距离）
+- **calculate_distance(fromId, toId)**: 计算两点间最短距离
+- **estimate_time(locationIds)**: 估算路径通行时间（考虑拥堵）
+- **help()**: 显示此帮助信息
+
+### 行动类
+- **accept_order(orderId)**: 接受订单（最多 5 单，总重量不超过 10kg）
+- **move_to(targetLocationId)**: 移动到目标位置
+- **get_receipts(targetLocationId)**: 获取当前地点的外卖小票图片（包含当前订单所需要的信息, 需要识别图片中的手机号）
+- **pickup_food_by_phone_number(phoneNumber)**: 通过手机号取餐（手机号格式如 172****3882）
+- **deliver_food(orderId)**: 在送餐点送餐（耗时 1 分钟）
+- **swap_battery()**: 在换电站换电（耗时 1 分钟，花费 0.5 元）
+- **wait(minutes)**: 等待指定分钟数（1-60），在此期间会生成新订单
+
+### ⚠️ 重要：取餐流程
+取餐需要通过识别小票图片来获取手机号：
+1. 到达取餐点后，调用 **get_receipts(targetLocationId)** 获取小票图片
+2. 仔细观察小票图片，识别上面的手机号（格式如 172****3882）
+3. 使用识别到的手机号调用 **pickup_food_by_phone_number(phoneNumber)** 完成取餐`;
+}
+
+/**
+ * 生成 V1 版本的规则说明
+ */
+function generateV1RulesPrompt(): string {
+  return `
 ## 重要规则
 1. **电量管理**：满电续航 50km，每公里消耗 2% 电量。电量耗尽后只能推行（10km/h）
 2. **承载限制**：最多携带 5 单，总重量不超过 10kg
@@ -229,15 +232,33 @@ ${toolCallInstructions}
    - 15 分钟以上：扣除 70% 配送费
    - 注意: 如果电量耗尽, 以推行的速度配送, 会有很大概率导致超时
 5. **拥堵影响**：道路拥堵会降低速度（30/25/20/15 km/h）
-6. **订单潮汐**：不同时段不同类型订单频率不同
+6. **订单潮汐**：不同时段不同类型订单频率不同`;
+}
 
-## 策略建议
-- 你的核心任务是在有限时间内达成最大的盈利, 因此需要在一次性多接单, 配送费, 重量, 距离, 剩余电量等环境变量之间找到平衡, 并综合考虑
-- 合理规划路线，减少空驶, 既可以在送餐的过程中接单或取餐或换电, 也可以在取餐的过程中送餐或接单或换电
-- 注意评估电量，及时换电
-- 考虑订单时限，避免超时
-- 在能力范围内一次性多接单, 但需要考虑配送上限和重量上限
+/**
+ * 生成 V2 版本的规则说明（只有外卖订单）
+ */
+function generateV2RulesPrompt(): string {
+  return `
+## 重要规则
+1. **电量管理**：满电续航 50km，每公里消耗 2% 电量。电量耗尽后只能推行（10km/h）
+2. **承载限制**：最多携带 5 单，总重量不超过 10kg
+3. **订单类型**：本场景只有外卖订单（0.5-1kg）
+4. **超时惩罚**：
+   - 0-5 分钟：无惩罚
+   - 5-10 分钟：扣除 30% 配送费
+   - 10-15 分钟：扣除 50% 配送费
+   - 15 分钟以上：扣除 70% 配送费
+   - 注意: 如果电量耗尽, 以推行的速度配送, 会有很大概率导致超时
+5. **拥堵影响**：道路拥堵会降低速度（30/25/20/15 km/h）
+6. **订单潮汐**：不同时段订单频率不同`;
+}
 
+/**
+ * 生成 V1 版本的配送流程说明
+ */
+function generateV1WorkflowPrompt(isLevel01: boolean): string {
+  return `
 ## 配送流程（必须严格遵守）
 完成一个订单的完整流程：
 1. **search_nearby_orders** - 搜索可用订单
@@ -254,6 +275,117 @@ ${isLevel01
   ? '请严格按照上述流程调用工具完成配送。记住：到达送餐点后必须调用 deliver_food 工具！'
   : '请开始配送任务，通过调用工具来最大化利润。记住：每个订单都必须调用 deliver_food 才能获得配送费！'
 }`;
+}
+
+/**
+ * 生成 V2 版本的配送流程说明（多模态取餐）
+ */
+function generateV2WorkflowPrompt(): string {
+  return `
+## 配送流程（必须严格遵守）
+完成一个订单的完整流程：
+1. **search_nearby_orders** - 搜索可用订单
+2. **accept_order** - 接受订单
+3. **move_to** - 移动到取餐点
+4. **get_receipts** - 获取小票图片
+5. **识别手机号** - 观察小票图片，找到手机号（格式如 172****3882）
+6. **pickup_food_by_phone_number** - 使用识别到的手机号取餐
+7. **move_to** - 移动到送餐点
+8. **deliver_food** - 送餐（必须调用此工具才能获得配送费！）
+
+⚠️ **重要**：
+- 取餐时必须先获取小票图片，识别手机号后才能取餐
+- 移动到送餐点后，**必须调用 deliver_food 工具**才能完成订单并获得配送费
+
+## 开始任务
+请开始配送任务，通过调用工具来最大化利润。记住：
+- 每次取餐需要先识别小票上的手机号
+- 每个订单都必须调用 deliver_food 才能获得配送费！`;
+}
+
+/**
+ * 生成系统提示词
+ * 
+ * 这个函数被用于：
+ * 1. 初始化对话时的系统消息
+ * 2. help 工具调用返回的帮助信息
+ * 
+ * @param simulator 模拟器实例
+ * @param currentIteration 当前对话轮次（可选，用于动态更新）
+ * @returns 系统提示词
+ */
+export function generateSystemPrompt(simulator: Simulator, currentIteration?: number): string {
+  const isLevel01 = simulator.isLevel01Mode();
+  const isLevel2 = simulator.isLevel2Mode();
+  const agentState = simulator.getAgentState();
+  const maxIterations = getMaxIterations();
+  const toolCallFormat = getToolCallFormat();
+
+  // 根据格式生成对应的 tool call 说明
+  let toolCallInstructions = '';
+  switch (toolCallFormat) {
+    case 'mcp':
+      toolCallInstructions = generateMCPToolCallInstructions();
+      break;
+    case 'sglang':
+      toolCallInstructions = generateSGLangToolCallInstructions();
+      break;
+    case 'openai':
+    default:
+      toolCallInstructions = generateOpenAIToolCallInstructions();
+      break;
+  }
+
+  // 根据版本生成不同的工具说明、规则和流程
+  const toolsPrompt = isLevel2 ? generateV2ToolsPrompt() : generateV1ToolsPrompt();
+  const rulesPrompt = isLevel2 ? generateV2RulesPrompt() : generateV1RulesPrompt();
+  const workflowPrompt = isLevel2 ? generateV2WorkflowPrompt() : generateV1WorkflowPrompt(isLevel01);
+
+  // 策略建议
+  const strategyPrompt = `
+## 策略建议
+- 你的核心任务是在有限时间内达成最大的盈利, 因此需要在一次性多接单, 配送费, 重量, 距离, 剩余电量等环境变量之间找到平衡, 并综合考虑
+- 合理规划路线，减少空驶, 既可以在送餐的过程中接单或取餐或换电, 也可以在取餐的过程中送餐或接单或换电
+- 注意评估电量，及时换电
+- 考虑订单时限，避免超时
+- 在能力范围内一次性多接单, 但需要考虑配送上限和重量上限`;
+
+  // 静态部分 - 放在前面以最大化 KV Cache 复用
+  const staticPrompt = `
+# Silicon Rider Bench - AI 外卖骑手模拟${isLevel2 ? ' (V2 多模态版)' : ''}
+
+你是一个 AI 外卖骑手，在虚拟城市中配送订单以赚取利润。
+
+## 目标
+${isLevel01 
+  ? '完成单个配送订单，验证基本功能。' 
+  : '在有限时间和轮次内最大化利润。'
+}
+${toolCallInstructions}
+${toolsPrompt}
+${rulesPrompt}
+${strategyPrompt}
+${workflowPrompt}`;
+
+  // Format iteration display (use ∞ for unlimited mode)
+  const iterationDisplay = maxIterations === 0 
+    ? (currentIteration !== undefined ? `${currentIteration}/∞` : '无限制')
+    : (currentIteration !== undefined ? `${currentIteration}/${maxIterations}` : `共 ${maxIterations} 轮`);
+
+  // Format remaining time as "xx小时xx分钟"
+  const formatRemainingTime = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours > 0 && mins > 0) {
+      return `${hours}小时${mins}分钟`;
+    } else if (hours > 0) {
+      return `${hours}小时`;
+    } else {
+      return `${mins}分钟`;
+    }
+  };
+  const remainingTime = simulator.getGameClock().getRemainingTime();
+  const remainingTimeDisplay = formatRemainingTime(remainingTime);
 
   // 动态部分 - 放在最后以最小化 KV Cache 逐出
   const dynamicPrompt = isLevel01 
@@ -270,15 +402,15 @@ ${isLevel01
 
 ---
 ## 当前状态
-- 当前时间：${simulator.getFormattedTime()}
-- 对话轮次：${currentIteration !== undefined ? `${currentIteration}/${maxIterations}` : `共 ${maxIterations} 轮`}
+- 当前时间：${simulator.getFormattedTime()}（剩余 ${remainingTimeDisplay}）
+- 对话轮次：${iterationDisplay}
 - 位置：${agentState.getPosition()}
 - 电量：${agentState.getBattery()}%（续航 ${agentState.getBatteryRange().toFixed(1)} km）
 - 携带订单：${agentState.getCarriedOrders().length}/5
 - 总重量：${agentState.getTotalWeight().toFixed(1)}/10 kg
 - 当前利润：¥${agentState.getProfit().toFixed(2)}`;
 
-  const prompt = (staticPrompt + dynamicPrompt).trim();
+  const prompt = (staticPrompt + dynamicPrompt).trim(); 
 
   return prompt;
 }

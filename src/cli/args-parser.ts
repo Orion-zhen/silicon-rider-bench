@@ -38,6 +38,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CLIArgs {
           parsed.level = 'level0.1';
         } else if (levelValue === '1') {
           parsed.level = 'level1';
+        } else if (levelValue === '2') {
+          parsed.level = 'level2';
         } else if (isValidLevelName(levelValue)) {
           parsed.level = levelValue as LevelName;
         } else {

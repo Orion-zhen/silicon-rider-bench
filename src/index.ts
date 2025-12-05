@@ -210,10 +210,11 @@ Silicon Rider Bench - AI 外卖骑手基准测试
 用法:
   npm run level0.1              运行 Level 0.1（教程场景）
   npm run level1                运行 Level 1（完整基准测试）
+  npm run level2                运行 Level 2（V2 多模态测试）
   npm run dev -- [options]      使用自定义选项运行
 
 选项:
-  --level, -l <level>           指定 Level（0.1 或 1）
+  --level, -l <level>           指定 Level（0.1, 1, 或 2）
   --seed, -s <seed>             指定地图种子（覆盖默认值）
   --model, -m <model>           指定 AI 模型名称
   --base-url <url>              指定 API 基础 URL（用于本地 llama.cpp 等）
@@ -224,15 +225,24 @@ Silicon Rider Bench - AI 外卖骑手基准测试
   --output, -o <file>           指定报告输出文件
   --help, -h                    显示此帮助信息
 
+Level 说明:
+  Level 0.1                     教程场景：简单地图，单个订单
+  Level 1                       完整基准测试：24小时，持续订单生成
+  Level 2 (V2)                  多模态测试：使用真实小票图片，需识别手机号取餐
+
 示例:
   npm run dev -- --level 1 --seed 12345
   npm run dev -- --level 0.1 --no-viz --output report.md
+  npm run dev -- --level 2 --mode web --port 8080
   npm run dev -- --base-url http://localhost:8080/v1 --level 0.1
 
 环境变量:
   API_KEY                       API 密钥（本地 API 不需要，支持 OpenRouter、OpenAI 等）
   MODEL_NAME                    AI 模型名称（可选）
   BASE_URL                      API 基础 URL（可选，本地 llama.cpp 使用如 http://localhost:8080/v1）
+  MAX_ITERATIONS                最大迭代次数（0 表示无限，默认 300）
+  BENCHMARK_TIME_LIMIT          基准测试时间限制，单位：小时（默认 24）
+  IMAGE_TRANSPORT_MODE          图片传输模式（base64 或 file_path，V2 多模态使用）
   `.trim());
 }
 
@@ -369,8 +379,9 @@ async function main(): Promise<void> {
     aiClient.initializeConversation(systemPrompt);
 
     // 设置 Web 可视化的最大迭代次数
+    // 使用 ?? 确保 0 值被正确处理（0 表示无限循环）
     if (webVisualization) {
-      webVisualization.setMaxIterations(aiClient.getConfig().maxIterations || 300);
+      webVisualization.setMaxIterations(aiClient.getConfig().maxIterations ?? 300);
     }
 
     // 记录开始时间

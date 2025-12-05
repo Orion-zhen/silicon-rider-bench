@@ -12,6 +12,7 @@ import { Node, Edge, NodeType } from '../types/index.js';
 export interface MapConfig {
   seed: number;
   size: 'small' | 'large';
+  excludeNodeTypes?: NodeType[]; // Node types to exclude from generation (for V2 mode)
 }
 
 /**
@@ -58,8 +59,8 @@ export function generateMap(config: MapConfig): GeneratedMap {
   const rng = new SeededRNG(config.seed);
   const sizeConfig = MAP_SIZE_CONFIG[config.size];
   
-  // Generate nodes
-  const nodes = generateNodes(rng, sizeConfig.nodeCount, sizeConfig.gridSize);
+  // Generate nodes (with optional exclusion of certain types)
+  const nodes = generateNodes(rng, sizeConfig.nodeCount, sizeConfig.gridSize, config.excludeNodeTypes);
   
   // Generate edges
   const edges = generateEdges(rng, nodes, sizeConfig.maxEdgeDistance);
@@ -77,12 +78,13 @@ export function generateMap(config: MapConfig): GeneratedMap {
 function generateNodes(
   rng: SeededRNG,
   nodeCount: number,
-  gridSize: number
+  gridSize: number,
+  excludeNodeTypes?: NodeType[]
 ): Map<string, Node> {
   const nodes = new Map<string, Node>();
   
   // Determine node type counts based on distribution
-  const typeCounts = determineNodeTypeCounts(rng, nodeCount);
+  const typeCounts = determineNodeTypeCounts(rng, nodeCount, excludeNodeTypes);
   
   // Generate all node types
   const nodeTypes: NodeType[] = [];
@@ -176,10 +178,12 @@ function generateNodes(
 
 /**
  * Determine how many nodes of each type to generate
+ * Uses proportional allocation to ensure each type gets its fair share
  */
 function determineNodeTypeCounts(
   rng: SeededRNG,
-  totalNodes: number
+  totalNodes: number,
+  excludeNodeTypes?: NodeType[]
 ): Record<NodeType, number> {
   const counts: Record<NodeType, number> = {
     restaurant: 0,
@@ -190,31 +194,72 @@ function determineNodeTypeCounts(
     battery_swap: 0,
   };
   
-  let remaining = totalNodes;
-  const types = Object.keys(NODE_TYPE_DISTRIBUTION) as NodeType[];
+  // Filter out excluded types
+  const excludeSet = new Set(excludeNodeTypes || []);
+  const types = (Object.keys(NODE_TYPE_DISTRIBUTION) as NodeType[]).filter(
+    type => !excludeSet.has(type)
+  );
   
-  // First pass: ensure at least one of each type
-  for (const type of types) {
-    counts[type] = 1;
-    remaining--;
+  if (types.length === 0) {
+    throw new Error('Cannot exclude all node types');
   }
   
-  // Second pass: distribute remaining nodes based on distribution
-  for (let i = 0; i < types.length; i++) {
-    const type = types[i];
+  // First pass: ensure at least one of each included type
+  for (const type of types) {
+    counts[type] = 1;
+  }
+  
+  // Second pass: calculate target counts based on proportions
+  const targetCounts: Record<NodeType, number> = { ...counts };
+  for (const type of types) {
     const dist = NODE_TYPE_DISTRIBUTION[type];
     
-    if (i === types.length - 1) {
-      // Last type gets all remaining nodes
-      counts[type] += remaining;
+    // Calculate target count with some randomness within the range
+    const minCount = Math.max(1, Math.floor(totalNodes * dist.min));
+    const maxCount = Math.ceil(totalNodes * dist.max);
+    
+    // Add some randomness: pick a value between min and max
+    const randomFactor = rng.nextFloat(); // 0 to 1
+    const targetCount = Math.round(minCount + (maxCount - minCount) * randomFactor);
+    
+    targetCounts[type] = Math.max(1, targetCount);
+  }
+  
+  // Third pass: normalize to ensure total equals totalNodes
+  let currentTotal = Object.values(targetCounts).reduce((sum, c) => sum + c, 0);
+  
+  // Adjust counts to match totalNodes
+  while (currentTotal !== totalNodes) {
+    if (currentTotal < totalNodes) {
+      // Need to add nodes - pick a random type (weighted by their max proportion)
+      const typeIndex = rng.nextInt(0, types.length - 1);
+      const type = types[typeIndex];
+      const dist = NODE_TYPE_DISTRIBUTION[type];
+      const maxCount = Math.ceil(totalNodes * dist.max);
+      
+      // Only add if we haven't exceeded the max for this type
+      if (targetCounts[type] < maxCount) {
+        targetCounts[type]++;
+        currentTotal++;
+      }
     } else {
-      // Calculate additional count within distribution range
-      const minCount = Math.max(0, Math.floor(totalNodes * dist.min) - 1);
-      const maxCount = Math.max(0, Math.floor(totalNodes * dist.max) - 1);
-      const additionalCount = Math.min(rng.nextInt(minCount, maxCount), remaining);
-      counts[type] += additionalCount;
-      remaining -= additionalCount;
+      // Need to remove nodes - pick a random type (avoid going below min)
+      const typeIndex = rng.nextInt(0, types.length - 1);
+      const type = types[typeIndex];
+      const dist = NODE_TYPE_DISTRIBUTION[type];
+      const minCount = Math.max(1, Math.floor(totalNodes * dist.min));
+      
+      // Only remove if we haven't gone below the min for this type
+      if (targetCounts[type] > minCount && targetCounts[type] > 1) {
+        targetCounts[type]--;
+        currentTotal--;
+      }
     }
+  }
+  
+  // Copy final counts
+  for (const type of types) {
+    counts[type] = targetCounts[type];
   }
   
   return counts;

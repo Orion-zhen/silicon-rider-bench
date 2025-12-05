@@ -16,6 +16,7 @@ import { Pathfinder } from '../world/pathfinder';
 import { ToolExecutor } from '../tools/tool-executor';
 import { createToolRegistry } from '../tools/index';
 import { ScoreCalculator } from '../scoring/score-calculator';
+import { ReceiptDataManager, createReceiptDataManager } from '../data/receipt-data-manager';
 
 /**
  * 模拟器状态
@@ -70,6 +71,10 @@ export class Simulator {
   // Level 0.1 特殊处理
   private isLevel01: boolean;
   private level01OrderCompleted: boolean = false;
+  
+  // Level 2 (V2 多模态) 特殊处理
+  private isLevel2: boolean;
+  private receiptDataManager: ReceiptDataManager | null = null;
 
   /**
    * 创建模拟器实例
@@ -80,6 +85,7 @@ export class Simulator {
     this.config = config;
     this.status = 'initialized';
     this.isLevel01 = config.orderCount !== undefined && config.orderCount === 1;
+    this.isLevel2 = config.useRealReceiptData === true;
     
     // 初始化统计信息
     this.stats = {
@@ -92,10 +98,11 @@ export class Simulator {
       batterySwaps: 0,
     };
     
-    // 生成地图
+    // 生成地图（V2 模式排除超市和药店）
     const map = generateMap({
       seed: config.seed,
       size: config.mapSize,
+      excludeNodeTypes: config.excludeNodeTypes,
     });
     
     this.nodes = map.nodes;
@@ -116,11 +123,23 @@ export class Simulator {
     this.congestionManager = new CongestionManager(this.edges, this.nodes);
     this.pathfinder = new Pathfinder(this.nodes, this.edges);
     
+    // V2 模式：初始化小票数据管理器并启用 V2 模式
+    if (this.isLevel2) {
+      try {
+        this.receiptDataManager = createReceiptDataManager();
+        this.orderGenerator.setV2Mode(true, this.receiptDataManager);
+        console.log('[Simulator] V2 mode enabled with real receipt data');
+      } catch (error) {
+        console.error('[Simulator] Failed to initialize V2 mode:', error);
+        this.isLevel2 = false;
+      }
+    }
+    
     // 初始化拥堵地图（使用开始时间）
     this.congestionMap = this.congestionManager.updateCongestion(startTime);
     
-    // 初始化工具系统
-    const toolRegistry = createToolRegistry();
+    // 初始化工具系统（V2 模式使用不同的工具）
+    const toolRegistry = createToolRegistry(this.isLevel2);
     this.toolExecutor = new ToolExecutor(toolRegistry);
     
     // 初始化评分计算器
@@ -146,6 +165,24 @@ export class Simulator {
       );
       
       this.orderGenerator.generateOrder(
+        currentTime,
+        pickupNodes,
+        deliveryNodes,
+        (from, to) => this.calculateDistance(from, to)
+      );
+    } else if (this.isLevel2) {
+      // Level 2 (V2): 使用真实小票数据，只有餐厅订单
+      const pickupNodes = Array.from(this.nodes.values()).filter(
+        n => n.type === 'restaurant'
+      );
+      const deliveryNodes = Array.from(this.nodes.values()).filter(
+        n => n.type === 'residential' || n.type === 'office'
+      );
+      
+      // 生成 5-10 个初始订单
+      const initialOrderCount = 5 + Math.floor(Math.random() * 6);
+      this.orderGenerator.generateOrders(
+        initialOrderCount,
         currentTime,
         pickupNodes,
         deliveryNodes,
@@ -317,7 +354,7 @@ export class Simulator {
   /**
    * 推进模拟（生成新订单等）
    * 
-   * 在 Level 1 中，应该定期调用此方法来生成新订单
+   * 在 Level 1/2 中，应该定期调用此方法来生成新订单
    */
   advanceSimulation(): void {
     if (this.isLevel01) {
@@ -325,16 +362,23 @@ export class Simulator {
       return;
     }
     
-    // Level 1: 根据基准频率生成新订单
-    // const baseFrequency = this.config.baseOrderFrequency || 5;
     const currentTime = this.gameClock.getCurrentTime();
     
     // 简单实现：每次调用生成 1-3 个订单
     const orderCount = 1 + Math.floor(Math.random() * 3);
     
-    const pickupNodes = Array.from(this.nodes.values()).filter(
-      n => n.type === 'restaurant' || n.type === 'supermarket' || n.type === 'pharmacy'
-    );
+    // V2 模式只从餐厅生成订单
+    let pickupNodes: Node[];
+    if (this.isLevel2) {
+      pickupNodes = Array.from(this.nodes.values()).filter(
+        n => n.type === 'restaurant'
+      );
+    } else {
+      pickupNodes = Array.from(this.nodes.values()).filter(
+        n => n.type === 'restaurant' || n.type === 'supermarket' || n.type === 'pharmacy'
+      );
+    }
+    
     const deliveryNodes = Array.from(this.nodes.values()).filter(
       n => n.type === 'residential' || n.type === 'office'
     );
@@ -486,6 +530,20 @@ export class Simulator {
    */
   isLevel01Mode(): boolean {
     return this.isLevel01;
+  }
+
+  /**
+   * 是否是 Level 2 (V2 多模态模式)
+   */
+  isLevel2Mode(): boolean {
+    return this.isLevel2;
+  }
+
+  /**
+   * 获取小票数据管理器（V2 模式）
+   */
+  getReceiptDataManager(): ReceiptDataManager | null {
+    return this.receiptDataManager;
   }
 
   /**

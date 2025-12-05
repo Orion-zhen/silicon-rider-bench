@@ -7,45 +7,26 @@
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-    <!-- Statistics Panel (Top - Horizontal with Header) -->
-    <section class="stats-panel">
-        <!-- Header Section -->
-        <div class="header-section">
-            <div class="header-content">
-                <h1>🛵 Silicon Rider Bench</h1>
-                <a href="https://github.com/KCORES/silicon-rider-bench" target="_blank" class="github-link">
-                    github.com/KCORES/silicon-rider-bench
-                </a>
-            </div>
-        </div>
-        
-        <!-- Stats Content -->
-        <div id="stats-panel" class="stats-content">
-            <!-- Stats will be rendered here by JavaScript -->
-        </div>
-    </section>
+    <!-- Tab Navigation (4px collapsed, expands on hover) -->
+    <nav class="tab-navigation" role="tablist" aria-label="Main Navigation">
+        <!-- Tabs will be rendered by JavaScript -->
+    </nav>
 
-    <!-- Main Content Area -->
-    <div class="container">
-        <div class="content-wrapper">
-            <!-- Map Area (Left - 50%) -->
-            <main class="main-content">
-                <div id="map-container" class="map-container">
-                    <!-- Map will be rendered here by JavaScript -->
-                </div>
-            </main>
-
-            <!-- Conversation Panel (Right - 50%) -->
-            <aside id="chat-panel" class="chat-panel">
-                <!-- Chat will be rendered here by JavaScript -->
-            </aside>
-        </div>
+    <!-- Page Container -->
+    <div class="page-container">
+        <!-- Pages will be rendered by JavaScript -->
     </div>
 
     <!-- JavaScript - Load dependencies first, then main -->
+    <script src="/js/i18n.js"></script>
+    <script src="/js/data-store.js"></script>
     <script src="/js/map-renderer.js"></script>
     <script src="/js/stats-panel.js"></script>
     <script src="/js/chat-panel.js"></script>
+    <script src="/js/tab-nav.js"></script>
+    <script src="/js/page-router.js"></script>
+    <script src="/js/agent-detail.js"></script>
+    <script src="/js/settings-page.js"></script>
     <script src="/js/main.js"></script>
 </body>
 </html>

@@ -72,6 +72,13 @@ export interface Order {
   deadline?: number;         // 游戏时间（分钟）
   pickedUp: boolean;
   delivered: boolean;
+  // V2 multimodal fields
+  phoneNumber?: string;      // 手机号（V2 模式使用）
+  receiptImagePath?: string; // 小票图片路径（V2 模式使用）
+  foodItems?: Array<{        // 菜品列表（V2 模式使用）
+    name: string;
+    price: number;
+  }>;
 }
 
 // ============================================================================
@@ -160,7 +167,9 @@ export type ErrorCode =
   | 'ORDER_NOT_CARRIED'      // 订单不在携带列表中
   | 'ORDER_NOT_PICKED_UP'    // 订单未取餐
   | 'BATTERY_DEPLETED'       // 电量耗尽无法移动
-  | 'NOT_AT_SWAP_STATION';   // 不在换电站
+  | 'NOT_AT_SWAP_STATION'    // 不在换电站
+  | 'PHONE_NUMBER_NOT_MATCH' // 手机号不匹配（V2 模式）
+  | 'NO_RECEIPTS_AT_LOCATION'; // 当前位置没有待取餐的小票（V2 模式）
 
 // ============================================================================
 // 工具 API 响应类型
@@ -193,7 +202,10 @@ export interface GetMyStatusResponse {
   }>;
   totalWeight: number;
   remainingCapacity: number;  // 10 - totalWeight
-  currentTime: number;
+  currentTime: number;        // 当前时间（分钟）
+  formattedTime: string;      // 格式化的当前时间 HH:mm
+  remainingTime: number;      // 剩余时间（分钟）
+  formattedRemainingTime: string;  // 格式化的剩余时间 "xx小时xx分钟"
   profit: number;
 }
 
@@ -343,6 +355,41 @@ export interface SwapBatteryResponse {
   newBattery: number; // 100%
 }
 
+/**
+ * get_receipts 响应（V2 模式）
+ */
+export interface GetReceiptsResponse {
+  receipts: Array<{
+    orderId: string;
+    imagePath: string;
+    imageData?: string;  // base64 encoded image or file:// URL
+  }>;
+  message?: string;
+}
+
+/**
+ * pickup_food_by_phone_number 响应（V2 模式）
+ */
+export interface PickupFoodByPhoneResponse {
+  success: boolean;
+  timeCost: number;  // 固定 2 分钟
+  orderId?: string;  // 匹配到的订单 ID
+  message?: string;
+}
+
+/**
+ * wait 响应
+ */
+export interface WaitResponse {
+  success: boolean;
+  timeCost: number;       // 等待的分钟数
+  previousTime: number;   // 等待前的时间
+  currentTime: number;    // 等待后的时间
+  newOrdersGenerated: number;  // 新生成的订单数量
+  expiredOrders: number;  // 过期移除的订单数量
+  message?: string;
+}
+
 // ============================================================================
 // 辅助类型
 // ============================================================================
@@ -374,4 +421,47 @@ export interface LevelConfig {
   seed: number;
   orderCount?: number;        // Level 0.1 使用
   baseOrderFrequency?: number; // Level 1 使用（分钟）
+  useRealReceiptData?: boolean; // Level 2 使用：是否使用真实小票数据
+  excludeNodeTypes?: NodeType[]; // 排除的节点类型（V2 模式下排除超市和药店）
 }
+
+// ============================================================================
+// V2 小票数据类型
+// ============================================================================
+
+/**
+ * 小票中的食品项
+ */
+export interface ReceiptFoodItem {
+  name: string;
+  price: number;
+}
+
+/**
+ * 单条小票数据
+ */
+export interface ReceiptData {
+  order_id: string;
+  image_filename: string;
+  phone_number: string;
+  food_items: ReceiptFoodItem[];
+  total_price: number;
+}
+
+/**
+ * 小票数据集
+ */
+export interface ReceiptDataset {
+  metadata: {
+    version: string;
+    created_at: string;
+    total_orders: number;
+    source: string;
+  };
+  orders: ReceiptData[];
+}
+
+/**
+ * 图片传输模式
+ */
+export type ImageTransportMode = 'base64' | 'file_path';

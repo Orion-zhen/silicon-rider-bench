@@ -2,16 +2,32 @@
  * Level 配置系统
  * Silicon Rider Bench - Agent 基准测试系统
  * 
- * 定义不同 Level 的配置，包括 Level 0.1 和 Level 1
+ * 定义不同 Level 的配置，包括 Level 0.1, Level 1 和 Level 2
  * 需求：12.1-12.3, 13.1-13.5
  */
 
 import { LevelConfig } from '../types';
 
 /**
+ * 获取基准测试时间限制（从环境变量读取）
+ * 环境变量 BENCHMARK_TIME_LIMIT 以小时为单位，默认 24 小时
+ * @returns 时间限制（分钟）
+ */
+function getBenchmarkTimeLimit(): number {
+  const envValue = process.env.BENCHMARK_TIME_LIMIT;
+  if (envValue !== undefined && envValue !== '') {
+    const hours = parseFloat(envValue);
+    if (!isNaN(hours) && hours > 0) {
+      return Math.round(hours * 60); // 转换为分钟
+    }
+  }
+  return 1440; // 默认 24 小时 = 1440 分钟
+}
+
+/**
  * Level 名称类型
  */
-export type LevelName = 'level0.1' | 'level1';
+export type LevelName = 'level0.1' | 'level1' | 'level2';
 
 /**
  * Level 配置映射
@@ -60,10 +76,32 @@ const LEVEL_CONFIGS: Record<LevelName, LevelConfig> = {
     seed: 67890,            // 固定种子
     baseOrderFrequency: 5,  // 基准频率：每 5 分钟
   },
+
+  /**
+   * Level 2 - 多模态测试场景
+   * 
+   * 特点：
+   * - 使用真实小票数据（100条循环使用）
+   * - 只有外卖订单（无超市、药店）
+   * - AI 骑手需通过识别小票图片中的手机号取餐
+   * - 使用 get_receipts 获取小票图片
+   * - 使用 pickup_food_by_phone_number 取餐
+   * - 禁用 pickup_food 工具
+   */
+  'level2': {
+    duration: 1440,              // 1440 分钟 = 24 小时
+    mapSize: 'large',            // 大地图
+    seed: 11111,                 // 固定种子
+    baseOrderFrequency: 5,       // 基准频率：每 5 分钟
+    useRealReceiptData: true,    // 使用真实小票数据
+    excludeNodeTypes: ['supermarket', 'pharmacy'], // 排除超市和药店
+  },
 };
 
 /**
  * 获取 Level 配置
+ * 
+ * 对于 level1 和 level2，会读取 BENCHMARK_TIME_LIMIT 环境变量覆盖默认时长
  * 
  * @param levelName Level 名称
  * @returns Level 配置对象
@@ -76,7 +114,15 @@ export function getLevelConfig(levelName: LevelName): LevelConfig {
     throw new Error(`Invalid level name: ${levelName}`);
   }
   
-  return { ...config }; // 返回副本以防止修改
+  // 返回副本以防止修改
+  const result = { ...config };
+  
+  // 对于 level1 和 level2，应用 BENCHMARK_TIME_LIMIT 环境变量
+  if (levelName === 'level1' || levelName === 'level2') {
+    result.duration = getBenchmarkTimeLimit();
+  }
+  
+  return result;
 }
 
 /**
@@ -86,9 +132,9 @@ export function getLevelConfig(levelName: LevelName): LevelConfig {
  * @returns 验证结果，如果有效返回 null，否则返回错误消息
  */
 export function validateLevelConfig(config: LevelConfig): string | null {
-  // 验证 duration
-  if (config.duration <= 0 || config.duration > 1440) {
-    return 'Duration must be between 1 and 1440 minutes';
+  // 验证 duration（最大支持 7 天 = 10080 分钟）
+  if (config.duration <= 0 || config.duration > 10080) {
+    return 'Duration must be between 1 and 10080 minutes (7 days)';
   }
   
   // 验证 mapSize
@@ -177,6 +223,7 @@ export function getLevelDescription(levelName: LevelName): string {
   const descriptions: Record<LevelName, string> = {
     'level0.1': 'Level 0.1 - 教程场景：简单地图，单个订单，验证基本工具调用流程',
     'level1': 'Level 1 - 完整基准测试：大地图，24小时周期，持续订单生成，动态拥堵',
+    'level2': 'Level 2 - 多模态测试：使用真实小票数据，需识别图片中的手机号取餐',
   };
   
   return descriptions[levelName] || 'Unknown level';
@@ -205,6 +252,14 @@ export function printLevelConfig(levelName: LevelName): string {
   if (config.baseOrderFrequency !== undefined) {
     info += `- 基准订单频率: 每 ${config.baseOrderFrequency} 分钟\n`;
   }
+
+  if (config.useRealReceiptData) {
+    info += `- 使用真实小票数据: 是\n`;
+  }
+
+  if (config.excludeNodeTypes && config.excludeNodeTypes.length > 0) {
+    info += `- 排除节点类型: ${config.excludeNodeTypes.join(', ')}\n`;
+  }
   
   return info;
 }
@@ -214,3 +269,4 @@ export function printLevelConfig(levelName: LevelName): string {
  */
 export const LEVEL_0_1_CONFIG = LEVEL_CONFIGS['level0.1'];
 export const LEVEL_1_CONFIG = LEVEL_CONFIGS['level1'];
+export const LEVEL_2_CONFIG = LEVEL_CONFIGS['level2'];

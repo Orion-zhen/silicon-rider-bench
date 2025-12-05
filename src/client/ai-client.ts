@@ -15,13 +15,29 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { Simulator } from '../core/simulator';
-import { ToolCallRequest } from '../types';
+import { ToolCallRequest, ImageTransportMode } from '../types';
 import { createToolRegistry } from '../tools';
 import { generateSystemPrompt } from './system-prompt';
 import type { WebVisualization } from '../web/web-visualization.js';
 
 // 加载环境变量
 dotenv.config();
+
+/**
+ * Get image transport mode from environment
+ */
+function getImageTransportMode(): ImageTransportMode {
+  const mode = process.env.IMAGE_TRANSPORT_MODE?.toLowerCase();
+  if (mode === 'file_path') {
+    return 'file_path';
+  }
+  return 'base64'; // default
+}
+
+// Note: We always use OpenAI standard format for multimodal messages
+// because we use the OpenAI SDK which calls /chat/completions endpoint.
+// Even Volcengine/Doubao's /chat/completions endpoint uses OpenAI format.
+// The input_text/input_image format is only for Volcengine's /responses endpoint.
 
 /**
  * 空内容占位符
@@ -44,6 +60,16 @@ export interface AIClientConfig {
   topP?: number;                // Top-P (nucleus sampling)
   repetitionPenalty?: number;   // Repetition penalty (frequency_penalty in OpenAI API)
   contextHistoryLimit?: number; // 限制传递给服务器的历史消息数量（不包含 system 消息），不设置或 0 表示不限制
+  imageTransportMode?: ImageTransportMode; // 图片传输模式（V2 多模态使用）
+}
+
+/**
+ * 多模态消息内容项 (OpenAI 标准格式)
+ */
+export interface MultimodalContentItem {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: { url: string };
 }
 
 /**
@@ -51,7 +77,7 @@ export interface AIClientConfig {
  */
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | MultimodalContentItem[];
   tool_call_id?: string;
   name?: string;
 }
@@ -149,7 +175,8 @@ export class AIClient {
     }
 
     // 解析最大迭代次数，支持从环境变量读取
-    const maxIterationsFromEnv = process.env.MAX_ITERATIONS 
+    // 0 表示无限循环
+    const maxIterationsFromEnv = process.env.MAX_ITERATIONS !== undefined && process.env.MAX_ITERATIONS !== ''
       ? parseInt(process.env.MAX_ITERATIONS, 10) 
       : undefined;
 
@@ -178,12 +205,20 @@ export class AIClient {
       baseURL,
       siteURL: config?.siteURL || process.env.SITE_URL,
       appName: config?.appName || process.env.APP_NAME || 'Silicon Rider Bench',
-      maxIterations: config?.maxIterations || maxIterationsFromEnv || 300,
+      maxIterations: config?.maxIterations ?? maxIterationsFromEnv ?? 300,
       temperature: config?.temperature ?? temperatureFromEnv ?? 1.0,
       topP: config?.topP ?? topPFromEnv ?? 0.95,
       repetitionPenalty: config?.repetitionPenalty ?? repetitionPenaltyFromEnv ?? 1.05,
       contextHistoryLimit: config?.contextHistoryLimit || contextHistoryLimitFromEnv,
+      imageTransportMode: config?.imageTransportMode || getImageTransportMode(),
     };
+  }
+
+  /**
+   * Get image transport mode
+   */
+  getImageTransportMode(): ImageTransportMode {
+    return this.config.imageTransportMode || 'base64';
   }
 
   /**
@@ -193,7 +228,9 @@ export class AIClient {
    * @returns OpenAI 格式的工具定义数组
    */
   private generateToolDefinitions(): any[] {
-    const registry = createToolRegistry();
+    // Check if V2 mode (use multimodal tools)
+    const v2Mode = this.simulator.isLevel2Mode();
+    const registry = createToolRegistry(v2Mode);
     return registry.toOpenAIFormat();
   }
 
@@ -224,6 +261,53 @@ export class AIClient {
   }
 
   /**
+   * 添加多模态消息（包含小票图片）- V2 模式使用
+   * 
+   * 使用 OpenAI 标准格式（text, image_url）。
+   * 这是因为我们使用 OpenAI SDK 调用 /chat/completions 端点，
+   * 即使是 Volcengine/Doubao 的兼容端点也使用这种格式。
+   * 
+   * @param receipts 小票数据数组
+   */
+  private addMultimodalReceiptMessage(receipts: Array<{ orderId: string; imagePath: string; imageData?: string }>): void {
+    if (receipts.length === 0) return;
+
+    const contentItems: MultimodalContentItem[] = [];
+
+    // 添加说明文字
+    const instructionText = `以下是${receipts.length}张外卖小票图片，请仔细查看每张小票，识别上面的手机号（格式如 172****3882），然后使用 pickup_food_by_phone_number 工具输入正确的手机号来取餐。`;
+    
+    // OpenAI standard format: type: text
+    contentItems.push({
+      type: 'text',
+      text: instructionText,
+    });
+
+    // 添加每张图片
+    for (const receipt of receipts) {
+      if (receipt.imageData) {
+        // OpenAI standard format: type: image_url, image_url: { url: string }
+        contentItems.push({
+          type: 'image_url',
+          image_url: { url: receipt.imageData },
+        });
+        contentItems.push({
+          type: 'text',
+          text: `订单 ${receipt.orderId} 的小票`,
+        });
+      }
+    }
+
+    // 添加多模态消息到对话历史
+    this.conversationHistory.push({
+      role: 'user',
+      content: contentItems,
+    });
+
+    console.log(`[AI Client] Added multimodal message with ${receipts.length} receipt image(s)`);
+  }
+
+  /**
    * 运行对话循环
    * 需求：16.2, 16.3, 16.4
    * 
@@ -236,10 +320,11 @@ export class AIClient {
     onIteration?: (iteration: number, message: string) => void
   ): Promise<void> {
     let iteration = 0;
-    const maxIterations = this.config.maxIterations || 300;
+    const maxIterations = this.config.maxIterations ?? 300;
+    const isUnlimited = maxIterations === 0;
     const isDebugMode = process.env.DEBUG === 'true';
 
-    while (!this.simulator.shouldTerminate() && iteration < maxIterations) {
+    while (!this.simulator.shouldTerminate() && (isUnlimited || iteration < maxIterations)) {
       iteration++;
 
       try {
@@ -267,13 +352,20 @@ export class AIClient {
           }
         }
 
-        // 清理消息，确保所有 content 都是字符串而不是 null/undefined/空字符串
+        // 清理消息，确保所有 content 都是字符串或有效的多模态数组
         // 这是为了兼容 llama.cpp 等服务器的聊天模板，它们可能无法处理 null 或空 content
         // 注意：使用 EMPTY_CONTENT_PLACEHOLDER 替换空内容
+        // 重要：保留多模态数组（MultimodalContentItem[]），不要将其转换为字符串
         const sanitizedMessages = messagesToSend.map(msg => {
-          // 处理 content：null/undefined/空字符串 都替换为占位符
-          let content = msg.content;
-          if (content === null || content === undefined || content === '') {
+          // 处理 content：
+          // - 如果是数组（多模态内容），直接保留
+          // - 如果是 null/undefined/空字符串，替换为占位符
+          // - 其他情况转换为字符串
+          let content: string | MultimodalContentItem[] = msg.content;
+          if (Array.isArray(content)) {
+            // 保留多模态内容数组，不做转换
+            // 多模态数组格式如：[{type: 'text', text: '...'}, {type: 'image_url', image_url: {...}}]
+          } else if (content === null || content === undefined || content === '') {
             content = EMPTY_CONTENT_PLACEHOLDER;
           } else {
             content = String(content);
@@ -523,6 +615,11 @@ export class AIClient {
               content: JSON.stringify(result.result),
             });
 
+            // V2 模式：如果是 get_receipts 工具，添加多模态消息让 AI 看到图片
+            if (result.toolName === 'get_receipts' && result.result.success && result.result.data?.receipts) {
+              this.addMultimodalReceiptMessage(result.result.data.receipts);
+            }
+
             // 发送工具结果到 Web 客户端
             if (this.webVisualization) {
               const success = result.result.success !== false;
@@ -577,7 +674,7 @@ export class AIClient {
     }
 
     // 检查终止原因
-    if (iteration >= maxIterations) {
+    if (!isUnlimited && iteration >= maxIterations) {
       console.warn(`Reached maximum iterations (${maxIterations})`);
     }
   }

@@ -13,6 +13,18 @@ class ChatPanel {
     this.maxMessages = 100; // 限制最大消息数量
     this.messageCount = 0;
     this.initialize();
+    
+    // Subscribe to language changes
+    if (typeof i18n !== 'undefined') {
+      i18n.subscribe(() => this.updateLabels());
+    }
+  }
+
+  /**
+   * Get translation helper
+   */
+  t(key) {
+    return typeof i18n !== 'undefined' ? i18n.t(key) : key;
   }
 
   /**
@@ -23,11 +35,11 @@ class ChatPanel {
     
     this.container.innerHTML = `
       <div class="chat-header">
-        <h3>AI Conversation</h3>
+        <h3 class="chat-title">${this.t('home.aiConversation')}</h3>
       </div>
       <div class="chat-messages" id="chat-messages">
         <div class="chat-welcome">
-          <p>🤖 Waiting for AI agent to start...</p>
+          <p>${this.t('home.waitingAI')}</p>
         </div>
       </div>
     `;
@@ -35,6 +47,21 @@ class ChatPanel {
     this.messagesContainer = document.getElementById('chat-messages');
     
     console.log('[ChatPanel] Messages container:', this.messagesContainer);
+  }
+
+  /**
+   * Update labels when language changes
+   */
+  updateLabels() {
+    const chatTitle = this.container.querySelector('.chat-title');
+    if (chatTitle) {
+      chatTitle.textContent = this.t('home.aiConversation');
+    }
+    
+    const chatWelcome = this.container.querySelector('.chat-welcome p');
+    if (chatWelcome) {
+      chatWelcome.textContent = this.t('home.waitingAI');
+    }
   }
 
   /**
@@ -95,7 +122,7 @@ class ChatPanel {
     
     messageElement.innerHTML = `
       <div class="message-header">
-        <span class="message-role">🔧 Tool Call</span>
+        <span class="message-role">${this.t('chat.toolCall')}</span>
         <span class="message-time">${this.getCurrentTime()}</span>
       </div>
       <div class="message-content">
@@ -126,12 +153,12 @@ class ChatPanel {
     messageElement.className = `chat-message chat-tool-result ${success ? 'success' : 'error'}`;
     
     const statusIcon = success ? '✅' : '❌';
-    const statusText = success ? 'Success' : 'Error';
+    const statusText = success ? this.t('chat.success') : this.t('chat.error');
     const formattedResult = this.formatToolResult(result);
     
     messageElement.innerHTML = `
       <div class="message-header">
-        <span class="message-role">${statusIcon} Tool Result: ${this.escapeHtml(toolName)}</span>
+        <span class="message-role">${statusIcon} ${this.t('chat.toolResult')}: ${this.escapeHtml(toolName)}</span>
         <span class="message-time">${this.getCurrentTime()}</span>
       </div>
       <div class="message-content">
@@ -189,9 +216,9 @@ class ChatPanel {
    */
   getRoleLabel(role) {
     const labels = {
-      'user': '👤 User',
-      'assistant': '🤖 AI Agent',
-      'system': '⚙️ System'
+      'user': this.t('chat.user'),
+      'assistant': this.t('chat.assistant'),
+      'system': this.t('chat.system')
     };
     return labels[role] || `📝 ${role}`;
   }

@@ -15,7 +15,7 @@
  * - 提供当前游戏时间查询
  */
 export class GameClock {
-  private currentTime: number; // 当前游戏时间（分钟，0-1440）
+  private currentTime: number; // 当前游戏时间（分钟）
   private readonly startTime: number; // 开始时间（分钟）
   private readonly endTime: number; // 结束时间（分钟）
 
@@ -28,11 +28,11 @@ export class GameClock {
    * 需求 3.1: WHEN 模拟器初始化 THEN 游戏时钟 SHALL 从配置的开始时间启动（默认 6:00）
    */
   constructor(startTime: number = 360, endTime: number = 1800) {
-    if (startTime < 0 || startTime >= 2880) {
-      throw new Error('Start time must be between 0 and 2879 minutes');
+    if (startTime < 0) {
+      throw new Error('Start time must be non-negative');
     }
-    if (endTime <= startTime || endTime > 2880) {
-      throw new Error('End time must be greater than start time and at most 2880 minutes');
+    if (endTime <= startTime) {
+      throw new Error('End time must be greater than start time');
     }
 
     this.startTime = startTime;
