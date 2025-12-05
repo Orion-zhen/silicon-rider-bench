@@ -119,6 +119,7 @@ class MapPage {
     this.dataStore = dataStoreRef;
     this.mapRenderer = null;
     this.actionMenu = null;
+    this.receiptPanel = null; // Receipt panel for V2 mode
     this.agents = new Map(); // agentId -> agent state
     this.activeAgentId = 'default';
     this.submenuDisplayMode = 'brief'; // 'off', 'brief', 'full'
@@ -206,6 +207,13 @@ class MapPage {
         const savedMode = localStorage.getItem('mapSubmenuMode') || 'brief';
         this.submenuDisplayMode = savedMode;
         this.actionMenu.setDisplayMode(savedMode);
+      });
+    }
+    
+    // Initialize ReceiptPanel for V2 mode
+    if (typeof ReceiptPanel !== 'undefined' && this.mapRenderer && this.elements.mapContainer) {
+      requestAnimationFrame(() => {
+        this.receiptPanel = new ReceiptPanel(this.elements.mapContainer, this.mapRenderer);
       });
     }
     
@@ -512,6 +520,11 @@ class MapPage {
       this.actionMenu.highlightAction('tool', data.toolName);
       this.actionMenu.showSubmenu('tool', data);
     }
+    
+    // Handle move_to: schedule receipt panel to hide after 2s
+    if (data.toolName === 'move_to' && this.receiptPanel && this.receiptPanel.isShowing()) {
+      this.receiptPanel.scheduleHide();
+    }
   }
   
   /**
@@ -522,6 +535,50 @@ class MapPage {
     if (this.actionMenu) {
       this.actionMenu.highlightAction('result');
       this.actionMenu.showSubmenu('result', data);
+    }
+    
+    // Handle get_receipts result: show receipt panel
+    if (data.toolName === 'get_receipts' && data.success && data.result) {
+      this.handleGetReceiptsResult(data.result);
+    }
+    
+    // Handle pickup_food_by_phone_number result: highlight the picked up receipt
+    if (data.toolName === 'pickup_food_by_phone_number' && data.success && data.result) {
+      this.handlePickupByPhoneResult(data.result);
+    }
+  }
+  
+  /**
+   * Handle get_receipts tool result
+   * Shows the receipt panel with receipt images
+   * @param {Object} result - Tool result data
+   */
+  handleGetReceiptsResult(result) {
+    if (!this.receiptPanel) {
+      return;
+    }
+    
+    const resultData = result.data || result;
+    const receipts = resultData.receipts || [];
+    
+    if (receipts.length > 0) {
+      this.receiptPanel.showReceipts(receipts);
+    }
+  }
+  
+  /**
+   * Handle pickup_food_by_phone_number tool result
+   * Highlights the selected receipt with green glow
+   * @param {Object} result - Tool result data
+   */
+  handlePickupByPhoneResult(result) {
+    if (!this.receiptPanel) return;
+    
+    const resultData = result.data || result;
+    const orderId = resultData.orderId;
+    
+    if (orderId) {
+      this.receiptPanel.highlightReceipt(orderId);
     }
   }
   
@@ -553,6 +610,10 @@ class MapPage {
   cleanup() {
     if (this.actionMenu) {
       this.actionMenu.cleanup();
+    }
+    
+    if (this.receiptPanel) {
+      this.receiptPanel.cleanup();
     }
   }
 }

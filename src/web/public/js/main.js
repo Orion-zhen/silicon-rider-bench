@@ -204,12 +204,15 @@ class Application {
       'accept_order': '接受订单',
       'move_to': '移动',
       'pickup_food': '取餐',
+      'pickup_food_by_phone_number': '凭手机号取餐',
       'deliver_food': '送餐',
       'swap_battery': '换电',
       'get_location_info': '查询位置信息',
       'calculate_distance': '计算距离',
       'estimate_time': '估算时间',
       'wait': '等待',
+      'get_receipts': '获取小票',
+      'help': '帮助',
     };
   }
 
@@ -703,9 +706,11 @@ class Application {
     // Critical hit animation map
     const criticalHitMap = {
       'pickup_food': '➕🍱',
+      'pickup_food_by_phone_number': '➕🍱',
       'deliver_food': '➖🍱',
       'swap_battery': '➕🔋',
-      'accept_order': '➕📋'
+      'accept_order': '➕📋',
+      'get_receipts': '🧾',
     };
     
     // Show action panel for tool call (homepage only, map page uses ActionMenu)
