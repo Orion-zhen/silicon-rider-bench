@@ -32,12 +32,23 @@ export type MessageType =
 export interface WebSocketMessage {
   type: MessageType;
   timestamp: number;
+  agentId?: string;  // 代理 ID（多代理模式使用）
   data: any;
 }
 
 // ============================================================================
 // 具体消息类型
 // ============================================================================
+
+/**
+ * 代理信息（用于初始化消息）
+ */
+export interface AgentInfo {
+  id: string;
+  modelName: string;
+  position: string;
+  battery: number;
+}
 
 /**
  * 初始化消息
@@ -64,7 +75,29 @@ export interface InitMessage extends WebSocketMessage {
       duration: number;
       modelName?: string;
     };
+    agents?: AgentInfo[];  // 多代理信息（多代理模式使用）
   };
+}
+
+/**
+ * 单个代理的状态数据
+ */
+export interface AgentStateData {
+  id?: string;  // 代理 ID
+  modelName?: string;  // 模型名称
+  position: string;
+  battery: number;
+  profit: number;
+  carriedOrders: Array<{
+    id: string;
+    type: string;
+    name: string;
+    weight: number;
+    deadline: number;
+    pickedUp: boolean;
+  }>;
+  totalWeight: number;
+  completedOrders: number;
 }
 
 /**
@@ -84,21 +117,9 @@ export interface StateUpdateMessage extends WebSocketMessage {
     cumulativeTotalTokens?: number;
     cumulativePromptTokens?: number;
     cumulativeCompletionTokens?: number;
-    agentState: {
-      position: string;
-      battery: number;
-      profit: number;
-      carriedOrders: Array<{
-        id: string;
-        type: string;
-        name: string;
-        weight: number;
-        deadline: number;
-        pickedUp: boolean;
-      }>;
-      totalWeight: number;
-      completedOrders: number;
-    };
+    agentState: AgentStateData;
+    // 多代理模式：所有代理的状态
+    allAgentStates?: AgentStateData[];
   };
 }
 

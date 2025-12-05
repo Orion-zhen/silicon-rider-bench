@@ -3,13 +3,18 @@
  * 
  * Provides configuration options including:
  * - Language selection (Chinese/English)
+ * - Map page submenu display mode
  * - Theme settings (future)
  * - About information
  */
 class SettingsPage {
-  constructor(containerElement) {
+  constructor(containerElement, appRef = null) {
     this.container = containerElement;
+    this.app = appRef; // Reference to Application for accessing mapPage
     this.elements = {};
+    
+    // Load saved settings
+    this.submenuMode = localStorage.getItem('mapSubmenuMode') || 'brief';
     
     this.initialize();
   }
@@ -32,9 +37,12 @@ class SettingsPage {
   cacheElements() {
     this.elements = {
       languageSelect: this.container.querySelector('#language-select'),
+      submenuToggle: this.container.querySelector('#submenu-display-toggle'),
       settingsTitle: this.container.querySelector('#settings-title'),
       languageLabel: this.container.querySelector('#language-label'),
       languageDesc: this.container.querySelector('#language-desc'),
+      submenuLabel: this.container.querySelector('#submenu-label'),
+      submenuDesc: this.container.querySelector('#submenu-desc'),
       themeLabel: this.container.querySelector('#theme-label'),
       themeDesc: this.container.querySelector('#theme-desc'),
       aboutLabel: this.container.querySelector('#about-label'),
@@ -53,6 +61,57 @@ class SettingsPage {
         i18n.setLanguage(e.target.value);
       });
     }
+    
+    // Submenu display toggle
+    if (this.elements.submenuToggle) {
+      this.elements.submenuToggle.addEventListener('click', (e) => {
+        const option = e.target.closest('.toggle-option');
+        if (option) {
+          const value = option.dataset.value;
+          this.setSubmenuMode(value);
+        }
+      });
+    }
+  }
+  
+  /**
+   * Set submenu display mode
+   * @param {string} mode - 'off', 'brief', 'full'
+   */
+  setSubmenuMode(mode) {
+    this.submenuMode = mode;
+    
+    // Save to localStorage
+    localStorage.setItem('mapSubmenuMode', mode);
+    
+    // Update toggle UI
+    if (this.elements.submenuToggle) {
+      const options = this.elements.submenuToggle.querySelectorAll('.toggle-option');
+      options.forEach(opt => {
+        opt.classList.toggle('active', opt.dataset.value === mode);
+      });
+      
+      // Update slider position
+      const slider = this.elements.submenuToggle.querySelector('.toggle-slider');
+      const activeOption = this.elements.submenuToggle.querySelector(`.toggle-option[data-value="${mode}"]`);
+      if (slider && activeOption) {
+        const index = Array.from(options).indexOf(activeOption);
+        slider.style.transform = `translateX(${index * 100}%)`;
+      }
+    }
+    
+    // Update mapPage if available
+    if (this.app && this.app.mapPage) {
+      this.app.mapPage.setSubmenuDisplayMode(mode);
+    }
+  }
+  
+  /**
+   * Get current submenu mode
+   * @returns {string}
+   */
+  getSubmenuMode() {
+    return this.submenuMode;
   }
 
   /**
@@ -108,6 +167,7 @@ class SettingsPage {
  */
 function renderSettingsPage() {
   const currentLang = i18n.getLanguage();
+  const currentSubmenuMode = localStorage.getItem('mapSubmenuMode') || 'brief';
   
   return `
     <div class="settings-page">
@@ -128,6 +188,31 @@ function renderSettingsPage() {
               <option value="zh" ${currentLang === 'zh' ? 'selected' : ''}>中文</option>
               <option value="en" ${currentLang === 'en' ? 'selected' : ''}>English</option>
             </select>
+          </div>
+        </div>
+        
+        <!-- Map Page Submenu Display Setting -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <div class="settings-icon">🗺️</div>
+            <div class="settings-section-info">
+              <h3 class="settings-label" id="submenu-label">地图页面 - 二级菜单显示</h3>
+              <p class="settings-desc" id="submenu-desc">控制地图页面中操作列表的二级菜单内容展示方式</p>
+            </div>
+          </div>
+          <div class="settings-control">
+            <div class="three-way-toggle" id="submenu-display-toggle">
+              <div class="toggle-option ${currentSubmenuMode === 'off' ? 'active' : ''}" data-value="off" title="关闭">
+                <span>关</span>
+              </div>
+              <div class="toggle-option ${currentSubmenuMode === 'brief' ? 'active' : ''}" data-value="brief" title="简略">
+                <span>简</span>
+              </div>
+              <div class="toggle-option ${currentSubmenuMode === 'full' ? 'active' : ''}" data-value="full" title="全部">
+                <span>全</span>
+              </div>
+              <div class="toggle-slider" style="transform: translateX(${currentSubmenuMode === 'off' ? '0' : currentSubmenuMode === 'brief' ? '100' : '200'}%)"></div>
+            </div>
           </div>
         </div>
         

@@ -337,7 +337,9 @@ class MapRenderer {
    * Transform world coordinates to screen coordinates
    */
   worldToScreen(x, y) {
-    const padding = 40;
+    // Use percentage-based padding (8%) to prevent emoji overflow
+    const containerSize = Math.min(this.container.clientWidth, this.container.clientHeight);
+    const padding = Math.max(40, containerSize * 0.08);
     const width = this.container.clientWidth - padding * 2;
     const height = this.container.clientHeight - padding * 2;
     
@@ -1118,8 +1120,8 @@ class MapRenderer {
       // 只删除非面板、非 agent 的元素
       const elementsToRemove = [];
       Array.from(this.container.children).forEach(child => {
-        // 保留面板、agent 元素和动画元素
-        // 特别注意：保留 path-animation-svg（路径动画）
+        // 保留面板、agent 元素、动画元素和 ActionMenu
+        // 特别注意：保留 path-animation-svg（路径动画）和 action-menu（操作列表）
         if (!child.classList.contains('search-result-panel') && 
             !child.classList.contains('agent-marker') &&
             !child.classList.contains('sonar-wave') &&
@@ -1127,7 +1129,9 @@ class MapRenderer {
             !child.classList.contains('critical-hit-animation') &&
             !child.classList.contains('location-info-panel') &&
             !child.classList.contains('path-result-panel') &&
-            !child.classList.contains('path-animation-svg')) {
+            !child.classList.contains('path-animation-svg') &&
+            !child.classList.contains('action-menu') &&
+            !child.classList.contains('action-submenu')) {
           elementsToRemove.push(child);
         }
       });

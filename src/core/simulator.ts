@@ -14,7 +14,7 @@ import { generateMap } from '../world/map-generator';
 import { CongestionManager } from '../world/congestion-manager';
 import { Pathfinder } from '../world/pathfinder';
 import { ToolExecutor } from '../tools/tool-executor';
-import { createToolRegistry } from '../tools/index';
+import { createToolRegistry, ToolRegistry } from '../tools/index';
 import { ScoreCalculator } from '../scoring/score-calculator';
 import { ReceiptDataManager, createReceiptDataManager } from '../data/receipt-data-manager';
 
@@ -56,6 +56,7 @@ export class Simulator {
   private orderGenerator: OrderGenerator;
   private congestionManager: CongestionManager;
   private pathfinder: Pathfinder;
+  private toolRegistry: ToolRegistry;
   private toolExecutor: ToolExecutor;
   private scoreCalculator: ScoreCalculator;
   
@@ -139,8 +140,8 @@ export class Simulator {
     this.congestionMap = this.congestionManager.updateCongestion(startTime);
     
     // 初始化工具系统（V2 模式使用不同的工具）
-    const toolRegistry = createToolRegistry(this.isLevel2);
-    this.toolExecutor = new ToolExecutor(toolRegistry);
+    this.toolRegistry = createToolRegistry(this.isLevel2);
+    this.toolExecutor = new ToolExecutor(this.toolRegistry);
     
     // 初始化评分计算器
     this.scoreCalculator = new ScoreCalculator();
@@ -495,6 +496,13 @@ export class Simulator {
    */
   getCongestionManager(): CongestionManager {
     return this.congestionManager;
+  }
+
+  /**
+   * 获取工具注册表
+   */
+  getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
   }
 
   /**

@@ -28,16 +28,22 @@ class TabNav {
         color: '#a59aca' // 藤紫
       },
       {
+        id: 'map',
+        labelKey: 'nav.map',
+        icon: '🗺️',
+        color: '#7058a3' // 菫色
+      },
+      {
         id: 'agent-detail',
         labelKey: 'nav.agentDetail',
         icon: '📊',
-        color: '#7058a3' // 菫色
+        color: '#674598' // 青紫
       },
       {
         id: 'settings',
         labelKey: 'nav.settings',
         icon: '⚙️',
-        color: '#674598' // 青紫
+        color: '#674196' // 菖蒲色
       }
     ];
     

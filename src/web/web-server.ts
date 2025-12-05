@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { WebSocketMessage } from './types';
+import type { ToolRegistry } from '../tools/tool-registry';
 
 export interface WebServerConfig {
   host: string;
@@ -10,11 +11,20 @@ export interface WebServerConfig {
   staticDir: string;
 }
 
+/**
+ * Tool info returned by /api/tools endpoint
+ */
+export interface ToolInfo {
+  name: string;
+  description: string;
+}
+
 export class WebServer {
   private config: WebServerConfig;
   private httpServer: http.Server | null = null;
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
+  private toolRegistry: ToolRegistry | null = null;
   
   // 定期清理断开连接的定时器
   private cleanupInterval: NodeJS.Timeout | null = null;
@@ -22,6 +32,27 @@ export class WebServer {
 
   constructor(config: WebServerConfig) {
     this.config = config;
+  }
+
+  /**
+   * Set the tool registry for /api/tools endpoint
+   */
+  setToolRegistry(registry: ToolRegistry): void {
+    this.toolRegistry = registry;
+  }
+
+  /**
+   * Get all registered tools info
+   */
+  getToolsInfo(): ToolInfo[] {
+    if (!this.toolRegistry) {
+      return [];
+    }
+    
+    return this.toolRegistry.getAllTools().map(tool => ({
+      name: tool.name,
+      description: tool.description,
+    }));
   }
 
   /**
@@ -177,10 +208,18 @@ export class WebServer {
   }
 
   /**
-   * Handle HTTP requests for static files
+   * Handle HTTP requests for static files and API endpoints
    */
   private handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    let filePath = req.url === '/' ? '/index.html' : req.url || '/index.html';
+    const url = req.url || '/';
+    
+    // Handle API endpoints
+    if (url.startsWith('/api/')) {
+      this.handleApiRequest(req, res);
+      return;
+    }
+    
+    let filePath = url === '/' ? '/index.html' : url;
     
     // Remove query string if present
     const queryIndex = filePath.indexOf('?');
@@ -247,6 +286,37 @@ export class WebServer {
       res.writeHead(200, { 'Content-Type': mimeType });
       res.end(data);
     });
+  }
+
+  /**
+   * Handle API requests
+   */
+  private handleApiRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const url = req.url || '';
+    
+    // CORS headers for API endpoints
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    
+    // GET /api/tools - Return registered tools list
+    if (url === '/api/tools' && req.method === 'GET') {
+      const tools = this.getToolsInfo();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, tools }));
+      return;
+    }
+    
+    // 404 for unknown API endpoints
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'API endpoint not found' }));
   }
 
   /**

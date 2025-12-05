@@ -465,3 +465,32 @@ export interface ReceiptDataset {
  * 图片传输模式
  */
 export type ImageTransportMode = 'base64' | 'file_path';
+
+// ============================================================================
+// 多代理配置类型
+// ============================================================================
+
+/**
+ * 单个代理配置
+ */
+export interface AgentConfig {
+  id: string;           // 代理唯一标识符（格式: {modelShortName}-{index}）
+  modelName: string;    // AI 模型名称（如 "openai/gpt-4"）
+  baseURL?: string;     // 自定义 API 基础 URL（可选）
+  apiKey?: string;      // 自定义 API 密钥（可选，用于支持多个提供商）
+}
+
+/**
+ * 多代理运行时状态
+ */
+export interface AgentRuntimeState {
+  id: string;           // 代理 ID
+  modelName: string;    // 模型名称
+  position: string;     // 当前位置
+  battery: number;      // 电量
+  profit: number;       // 利润
+  carriedOrders: Order[]; // 携带的订单
+  status: 'idle' | 'thinking' | 'executing' | 'error'; // 运行状态
+  lastAction?: string;  // 最后的操作
+  lastActionTime?: number; // 最后操作时间
+}

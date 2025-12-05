@@ -19,6 +19,8 @@ import { Order, AgentState as IAgentState } from '../types';
  */
 export class AgentState {
   private state: IAgentState;
+  private readonly agentId: string;
+  private readonly modelName: string;
 
   // 常量
   private static readonly MAX_ORDERS = 5;        // 最大订单数量
@@ -28,8 +30,12 @@ export class AgentState {
   /**
    * 初始化智能体状态
    * @param initialPosition 初始位置节点 ID
+   * @param agentId 代理 ID（可选，默认为 'default'）
+   * @param modelName 模型名称（可选，默认为 'unknown'）
    */
-  constructor(initialPosition: string) {
+  constructor(initialPosition: string, agentId: string = 'default', modelName: string = 'unknown') {
+    this.agentId = agentId;
+    this.modelName = modelName;
     this.state = {
       position: initialPosition,
       battery: 100,
@@ -39,6 +45,20 @@ export class AgentState {
       completedOrders: 0,
       totalDistance: 0,
     };
+  }
+
+  /**
+   * 获取代理 ID
+   */
+  getAgentId(): string {
+    return this.agentId;
+  }
+
+  /**
+   * 获取模型名称
+   */
+  getModelName(): string {
+    return this.modelName;
   }
 
   // ============================================================================

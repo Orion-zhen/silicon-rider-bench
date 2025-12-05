@@ -3,7 +3,7 @@
  * 负责根据时间、订单潮汐规则生成订单，并管理订单池
  */
 
-import { Order, OrderType, Node, ReceiptData } from '../types';
+import { Order, OrderType, Node } from '../types';
 import { SeededRNG } from '../utils/seeded-rng';
 import { calculateTotalFee } from './fee-calculator';
 import { getFoodSelector } from '../data/food-selector';

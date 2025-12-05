@@ -3,6 +3,7 @@
  */
 
 import { LevelName, isValidLevelName } from '../levels/level-config';
+import type { AgentConfig } from '../types';
 
 /**
  * 命令行参数接口
@@ -18,6 +19,7 @@ export interface CLIArgs {
   mode: 'terminal' | 'web';
   host: string;
   port: number;
+  agents?: AgentConfig[];  // 多代理配置（从环境变量 AGENTS 解析）
 }
 
 /**
@@ -141,5 +143,46 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CLIArgs {
     parsed.port = 3000;
   }
 
+  // Parse AGENTS environment variable for multi-agent configuration
+  const agentsEnv = process.env.AGENTS;
+  if (agentsEnv) {
+    try {
+      const agentsConfig = JSON.parse(agentsEnv);
+      if (Array.isArray(agentsConfig) && agentsConfig.length > 0) {
+        parsed.agents = agentsConfig.map((agent: any, index: number) => {
+          const modelName = agent.model || agent.modelName;
+          if (!modelName) {
+            throw new Error(`Agent at index ${index} is missing model/modelName`);
+          }
+          
+          // Generate agent ID: extract model short name and append index
+          const modelShortName = getModelShortName(modelName);
+          const agentId = agent.id || `${modelShortName}-${index + 1}`;
+          
+          return {
+            id: agentId,
+            modelName: modelName,
+            baseURL: agent.baseURL || agent.base_url,
+            apiKey: agent.apiKey || agent.api_key,
+          };
+        });
+        console.log(`[Args] Loaded ${parsed.agents.length} agent(s) from AGENTS environment variable`);
+      }
+    } catch (error) {
+      console.error('[Args] Failed to parse AGENTS environment variable:', error);
+      console.error('[Args] Expected format: AGENTS=\'[{"model":"openai/gpt-4"},{"model":"anthropic/claude-3"}]\'');
+    }
+  }
+
   return parsed as CLIArgs;
+}
+
+/**
+ * Extract short name from full model name
+ * e.g., "openai/gpt-4o" -> "gpt-4o"
+ * e.g., "anthropic/claude-3-5-sonnet" -> "claude-3-5-sonnet"
+ */
+function getModelShortName(modelName: string): string {
+  const parts = modelName.split('/');
+  return parts[parts.length - 1];
 }

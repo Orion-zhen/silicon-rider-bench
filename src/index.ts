@@ -296,6 +296,9 @@ async function main(): Promise<void> {
         const url = `http://${args.host}:${args.port}`;
         console.log('✓ Web 服务器已启动');
         console.log(`  访问 URL: ${url}\n`);
+        
+        // Set tool registry for /api/tools endpoint
+        webServer.setToolRegistry(simulator.getToolRegistry());
 
         // 初始化 AI 客户端（需要先初始化以获取模型名称）
         console.log('正在初始化 AI 客户端...');

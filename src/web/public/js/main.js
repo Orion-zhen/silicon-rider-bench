@@ -191,6 +191,7 @@ class Application {
     this.statsPanel = null;
     this.chatPanel = null;
     this.agentDetailPage = null;
+    this.mapPage = null;
     this.pendingSonarToolName = null;
     this.pendingPanelData = [];
     
@@ -386,6 +387,43 @@ class Application {
       }
     });
 
+    // Map Page
+    this.pageRouter.registerPage('map', {
+      title: 'Map',
+      render: () => {
+        if (typeof renderMapPage !== 'undefined') {
+          return renderMapPage();
+        }
+        return '<div class="map-page"><p>Loading...</p></div>';
+      },
+      init: (pageElement) => {
+        if (typeof MapPage !== 'undefined') {
+          this.mapPage = new MapPage(pageElement, dataStore);
+          
+          // Update connection status immediately after init
+          const isConnected = this.connectionManager.isConnected();
+          this.mapPage.updateConnectionStatus(isConnected);
+          
+          return this.mapPage;
+        }
+        return null;
+      },
+      update: (instance) => {
+        if (instance && instance.updateFromDataStore) {
+          instance.updateFromDataStore();
+        }
+        // Also update connection status on page revisit
+        if (instance && instance.updateConnectionStatus) {
+          instance.updateConnectionStatus(this.connectionManager.isConnected());
+        }
+      },
+      cleanup: () => {
+        if (this.mapPage && this.mapPage.cleanup) {
+          this.mapPage.cleanup();
+        }
+      }
+    });
+
     // Agent Detail Page
     this.pageRouter.registerPage('agent-detail', {
       title: 'Agent Detail',
@@ -425,7 +463,7 @@ class Application {
       },
       init: (pageElement) => {
         if (typeof SettingsPage !== 'undefined') {
-          this.settingsPage = new SettingsPage(pageElement);
+          this.settingsPage = new SettingsPage(pageElement, this);
           return this.settingsPage;
         }
         return null;
@@ -506,6 +544,17 @@ class Application {
       
       this.mapRenderer.render();
     }
+    
+    // Initialize map page renderer if exists
+    if (this.mapPage && this.mapPage.mapRenderer) {
+      this.mapPage.mapRenderer.initialize(data.nodes, data.edges);
+      
+      if (data.config && data.config.modelName) {
+        this.mapPage.mapRenderer.setModelName(data.config.modelName);
+      }
+      
+      this.mapPage.mapRenderer.render();
+    }
 
     // Update stats panel
     if (this.statsPanel && data.config && data.config.modelName) {
@@ -523,10 +572,33 @@ class Application {
     // Update data store
     dataStore.handleStateUpdate(data);
 
-    // Update map renderer
+    // Update map renderer (homepage)
     if (this.mapRenderer && data.agentState) {
       this.mapRenderer.updateAgentPosition(data.agentState.position);
       this.mapRenderer.render();
+    }
+    
+    // Update map page renderer and status panel
+    if (this.mapPage) {
+      // Update map renderer
+      if (this.mapPage.mapRenderer && data.agentState) {
+        this.mapPage.mapRenderer.updateAgentPosition(data.agentState.position);
+        this.mapPage.mapRenderer.render();
+      }
+      
+      // Update game status (time, turn, tokens)
+      this.mapPage.updateGameStatus({
+        formattedTime: data.formattedTime,
+        currentIteration: data.currentIteration,
+        maxIterations: data.maxIterations,
+        lastTotalTokens: data.lastTotalTokens,
+        cumulativeTotalTokens: data.cumulativeTotalTokens,
+      });
+      
+      // Update agent state (position, battery, profit, orders)
+      if (data.agentState) {
+        this.mapPage.updateAgentState(data.agentState);
+      }
     }
 
     // Update stats panel
@@ -550,8 +622,8 @@ class Application {
     // Update data store
     dataStore.handleConversation(data);
 
-    // Show action panel for assistant messages
-    if (data.role === 'assistant' && data.content && this.mapRenderer) {
+    // Show action panel for assistant messages (homepage only)
+    if (data.role === 'assistant' && data.content) {
       let displayContent = data.content;
       if (displayContent.length > 100) {
         displayContent = displayContent.substring(0, 100) + '...';
@@ -559,7 +631,16 @@ class Application {
       
       const modelName = dataStore.get('modelName');
       const actionText = `${modelName}: ${displayContent}`;
-      this.mapRenderer.showActionPanel(actionText, 'conversation');
+      
+      // Only show action panel on homepage, map page uses ActionMenu instead
+      if (this.mapRenderer) {
+        this.mapRenderer.showActionPanel(actionText, 'conversation');
+      }
+    }
+    
+    // Update map page action menu
+    if (this.mapPage && this.mapPage.handleConversation) {
+      this.mapPage.handleConversation(data);
     }
     
     // Update chat panel
@@ -575,8 +656,8 @@ class Application {
     // Update data store
     dataStore.handleReasoning(data);
     
-    // Show reasoning panel
-    if (data.content && this.mapRenderer) {
+    // Show reasoning panel (homepage only)
+    if (data.content) {
       let displayContent = data.content;
       if (displayContent.length > 150) {
         displayContent = displayContent.substring(0, 150) + '...';
@@ -584,7 +665,16 @@ class Application {
       
       const modelName = dataStore.get('modelName');
       const reasoningText = `${modelName} 💭: ${displayContent}`;
-      this.mapRenderer.showActionPanel(reasoningText, 'reasoning');
+      
+      // Only show action panel on homepage, map page uses ActionMenu instead
+      if (this.mapRenderer) {
+        this.mapRenderer.showActionPanel(reasoningText, 'reasoning');
+      }
+    }
+    
+    // Update map page action menu
+    if (this.mapPage && this.mapPage.handleReasoning) {
+      this.mapPage.handleReasoning(data);
     }
     
     // Update chat panel
@@ -606,32 +696,51 @@ class Application {
       this.statsPanel.updateToolCalls(dataStore.get('totalToolCalls'));
     }
     
-    // Show action panel for tool call
+    const toolNameChinese = this.toolNameMap[data.toolName] || data.toolName;
+    const argsStr = JSON.stringify(data.arguments || {});
+    const actionHtml = `<span class="tool-action-badge">${toolNameChinese}</span> 调用 tool ${data.toolName}(${argsStr})`;
+    
+    // Critical hit animation map
+    const criticalHitMap = {
+      'pickup_food': '➕🍱',
+      'deliver_food': '➖🍱',
+      'swap_battery': '➕🔋',
+      'accept_order': '➕📋'
+    };
+    
+    // Show action panel for tool call (homepage only, map page uses ActionMenu)
     if (this.mapRenderer) {
-      const toolNameChinese = this.toolNameMap[data.toolName] || data.toolName;
-      const argsStr = JSON.stringify(data.arguments || {});
-      const actionHtml = `<span class="tool-action-badge">${toolNameChinese}</span> 调用 tool ${data.toolName}(${argsStr})`;
-      
       this.mapRenderer.showActionPanel(actionHtml, 'tool-call');
       
       // Show critical hit animation
-      const criticalHitMap = {
-        'pickup_food': '➕🍱',
-        'deliver_food': '➖🍱',
-        'swap_battery': '➕🔋',
-        'accept_order': '➕📋'
-      };
-      
       if (criticalHitMap[data.toolName]) {
         this.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName]);
       }
     }
     
+    // Show critical hit animation on map page (but no action panel)
+    if (this.mapPage && this.mapPage.mapRenderer) {
+      if (criticalHitMap[data.toolName]) {
+        this.mapPage.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName]);
+      }
+    }
+    
     // Show sonar animation for search tools
-    if ((data.toolName === 'search_nearby_orders' || data.toolName === 'search_nearby_battery_stations') && this.mapRenderer) {
+    if (data.toolName === 'search_nearby_orders' || data.toolName === 'search_nearby_battery_stations') {
       const radius = data.arguments && data.arguments.radius ? data.arguments.radius : 10;
       this.pendingSonarToolName = data.toolName;
-      this.mapRenderer.showSonarAnimation(radius);
+      
+      if (this.mapRenderer) {
+        this.mapRenderer.showSonarAnimation(radius);
+      }
+      if (this.mapPage && this.mapPage.mapRenderer) {
+        this.mapPage.mapRenderer.showSonarAnimation(radius);
+      }
+    }
+    
+    // Update map page action menu
+    if (this.mapPage && this.mapPage.handleToolCall) {
+      this.mapPage.handleToolCall(data);
     }
     
     // Update chat panel
@@ -648,7 +757,7 @@ class Application {
     dataStore.handleToolResult(data);
     
     // Show search result panels for search tools
-    if (data.success && this.mapRenderer) {
+    if (data.success) {
       const resultData = data.result && data.result.data ? data.result.data : data.result;
       
       if (data.toolName === 'search_nearby_orders' && resultData && resultData.orders) {
@@ -672,7 +781,10 @@ class Application {
           }
         });
         
-        this.showPanelsAfterSonar(panelDataList);
+        this.showPanelsAfterSonar(panelDataList, this.mapRenderer);
+        if (this.mapPage && this.mapPage.mapRenderer) {
+          this.showPanelsAfterSonar(panelDataList, this.mapPage.mapRenderer);
+        }
         
       } else if (data.toolName === 'search_nearby_battery_stations' && resultData && resultData.stations) {
         const panelDataList = [];
@@ -688,28 +800,40 @@ class Application {
           }
         });
         
-        this.showPanelsAfterSonar(panelDataList);
+        this.showPanelsAfterSonar(panelDataList, this.mapRenderer);
+        if (this.mapPage && this.mapPage.mapRenderer) {
+          this.showPanelsAfterSonar(panelDataList, this.mapPage.mapRenderer);
+        }
         
       } else if (data.toolName === 'get_location_info' && resultData && resultData.id) {
+        const locationData = {
+          name: resultData.name || 'Unknown',
+          type: resultData.type || 'unknown',
+          position: resultData.position || { x: 0, y: 0 }
+        };
+        
         setTimeout(() => {
-          this.mapRenderer.showLocationInfoPanel(resultData.id, {
-            name: resultData.name || 'Unknown',
-            type: resultData.type || 'unknown',
-            position: resultData.position || { x: 0, y: 0 }
-          });
+          if (this.mapRenderer) {
+            this.mapRenderer.showLocationInfoPanel(resultData.id, locationData);
+          }
+          if (this.mapPage && this.mapPage.mapRenderer) {
+            this.mapPage.mapRenderer.showLocationInfoPanel(resultData.id, locationData);
+          }
         }, 500);
         
       } else if (data.toolName === 'calculate_distance' && resultData && resultData.path) {
         setTimeout(() => {
           const distance = typeof resultData.distance === 'number' ? resultData.distance : 0;
+          const pathData = {
+            distance: distance.toFixed(2) + ' km'
+          };
           
-          this.mapRenderer.showPathAnimation(
-            resultData.path,
-            'green',
-            {
-              distance: distance.toFixed(2) + ' km'
-            }
-          );
+          if (this.mapRenderer) {
+            this.mapRenderer.showPathAnimation(resultData.path, 'green', pathData);
+          }
+          if (this.mapPage && this.mapPage.mapRenderer) {
+            this.mapPage.mapRenderer.showPathAnimation(resultData.path, 'green', pathData);
+          }
         }, 500);
         
       } else if (data.toolName === 'estimate_time' && resultData) {
@@ -734,18 +858,26 @@ class Application {
             const totalTime = typeof resultData.totalTime === 'number' ? resultData.totalTime : 0;
             
             if (path.length >= 2) {
-              this.mapRenderer.showPathAnimation(
-                path,
-                'blue',
-                {
-                  time: totalTime.toFixed(2) + ' 分钟',
-                  distance: totalDistance.toFixed(2) + ' km'
-                }
-              );
+              const pathData = {
+                time: totalTime.toFixed(2) + ' 分钟',
+                distance: totalDistance.toFixed(2) + ' km'
+              };
+              
+              if (this.mapRenderer) {
+                this.mapRenderer.showPathAnimation(path, 'blue', pathData);
+              }
+              if (this.mapPage && this.mapPage.mapRenderer) {
+                this.mapPage.mapRenderer.showPathAnimation(path, 'blue', pathData);
+              }
             }
           }, 500);
         }
       }
+    }
+    
+    // Update map page action menu
+    if (this.mapPage && this.mapPage.handleToolResult) {
+      this.mapPage.handleToolResult(data);
     }
     
     // Update chat panel
@@ -756,17 +888,19 @@ class Application {
   
   /**
    * Show panels after sonar animation completes
+   * @param {Array} panelDataList - List of panel data to show
+   * @param {MapRenderer} targetRenderer - The map renderer to show panels on
    */
-  showPanelsAfterSonar(panelDataList) {
-    if (!this.mapRenderer) return;
+  showPanelsAfterSonar(panelDataList, targetRenderer) {
+    if (!targetRenderer) return;
     
-    if (this.mapRenderer.isSonarAnimating) {
+    if (targetRenderer.isSonarAnimating) {
       setTimeout(() => {
-        this.showPanelsAfterSonar(panelDataList);
+        this.showPanelsAfterSonar(panelDataList, targetRenderer);
       }, 100);
     } else {
       const panelsWithDistance = panelDataList.map(panelData => {
-        const distance = this.mapRenderer.calculateDistanceToAgent(panelData.locationId);
+        const distance = targetRenderer.calculateDistanceToAgent(panelData.locationId);
         return { ...panelData, distance };
       });
       
@@ -780,7 +914,7 @@ class Application {
         setTimeout(() => {
           const autoHideDuration = 10000 + (index * 1000);
           
-          this.mapRenderer.showSearchResultPanel(
+          targetRenderer.showSearchResultPanel(
             panelData.locationId,
             panelData.type,
             panelData.data,
@@ -823,6 +957,11 @@ class Application {
         if (statusText) statusText.textContent = 'Disconnected';
         statusElement.className = 'connection-status disconnected';
       }
+    }
+    
+    // Update map page connection status
+    if (this.mapPage && this.mapPage.updateConnectionStatus) {
+      this.mapPage.updateConnectionStatus(connected);
     }
   }
 }

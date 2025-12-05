@@ -19,6 +19,7 @@ const i18n = {
     zh: {
       // Navigation
       'nav.homepage': '主页',
+      'nav.map': '地图',
       'nav.agentDetail': 'Agent 详情',
       'nav.settings': '设置',
       
@@ -125,6 +126,7 @@ const i18n = {
     en: {
       // Navigation
       'nav.homepage': 'Homepage',
+      'nav.map': 'Map',
       'nav.agentDetail': 'Agent Detail',
       'nav.settings': 'Settings',
       

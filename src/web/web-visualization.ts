@@ -28,6 +28,7 @@ import type {
 export class WebVisualization {
   private simulator: Simulator;
   private webServer: WebServer;
+  private agentId: string;
   private modelName: string;
   private currentIteration: number = 0;
   private maxIterations: number = 300;
@@ -44,10 +45,25 @@ export class WebVisualization {
   private pendingStateUpdate = false;
   private throttleTimer: NodeJS.Timeout | null = null;
 
-  constructor(simulator: Simulator, webServer: WebServer, modelName?: string) {
+  constructor(simulator: Simulator, webServer: WebServer, modelName?: string, agentId?: string) {
     this.simulator = simulator;
     this.webServer = webServer;
     this.modelName = modelName || 'Unknown';
+    this.agentId = agentId || 'default';
+  }
+
+  /**
+   * 获取代理 ID
+   */
+  getAgentId(): string {
+    return this.agentId;
+  }
+
+  /**
+   * 设置代理 ID
+   */
+  setAgentId(agentId: string): void {
+    this.agentId = agentId;
   }
   
   /**
@@ -209,6 +225,7 @@ export class WebVisualization {
     const message: StateUpdateMessage = {
       type: 'state_update',
       timestamp: Date.now(),
+      agentId: this.agentId,
       data: {
         currentTime,
         formattedTime,
@@ -221,6 +238,8 @@ export class WebVisualization {
         cumulativePromptTokens: this.cumulativePromptTokens,
         cumulativeCompletionTokens: this.cumulativeCompletionTokens,
         agentState: {
+          id: this.agentId,
+          modelName: this.modelName,
           position: agentState.getPosition(),
           battery: agentState.getBattery(),
           profit: agentState.getProfit(),
@@ -245,6 +264,7 @@ export class WebVisualization {
     const message: ConversationMessage = {
       type: 'conversation',
       timestamp: Date.now(),
+      agentId: this.agentId,
       data: {
         role,
         content,
@@ -264,6 +284,7 @@ export class WebVisualization {
     const message = {
       type: 'reasoning' as const,
       timestamp: Date.now(),
+      agentId: this.agentId,
       data: {
         content,
       },
@@ -283,6 +304,7 @@ export class WebVisualization {
     const message: ToolCallMessage = {
       type: 'tool_call',
       timestamp: Date.now(),
+      agentId: this.agentId,
       data: {
         toolName,
         arguments: args,
@@ -304,6 +326,7 @@ export class WebVisualization {
     const message: ToolResultMessage = {
       type: 'tool_result',
       timestamp: Date.now(),
+      agentId: this.agentId,
       data: {
         toolName,
         success,
@@ -326,6 +349,7 @@ export class WebVisualization {
     const message: SimulationEndMessage = {
       type: 'simulation_end',
       timestamp: Date.now(),
+      agentId: this.agentId,
       data: {
         report,
         finalProfit: stats.totalProfit,
