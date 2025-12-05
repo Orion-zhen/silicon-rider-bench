@@ -99,9 +99,21 @@ const LEVEL_CONFIGS: Record<LevelName, LevelConfig> = {
 };
 
 /**
+ * 生成随机种子
+ * 基于当前时间戳生成一个随机种子
+ */
+function generateRandomSeed(): number {
+  return Math.floor(Math.random() * 1000000) + Date.now() % 100000;
+}
+
+/**
  * 获取 Level 配置
  * 
- * 对于 level1 和 level2，会读取 BENCHMARK_TIME_LIMIT 环境变量覆盖默认时长
+ * 对于 level1 和 level2：
+ * - 会读取 BENCHMARK_TIME_LIMIT 环境变量覆盖默认时长
+ * - 会生成随机种子（除非通过命令行参数显式指定）
+ * 
+ * Level 0.1 保持固定种子，因为它是教程场景，需要确保一致性
  * 
  * @param levelName Level 名称
  * @returns Level 配置对象
@@ -117,9 +129,11 @@ export function getLevelConfig(levelName: LevelName): LevelConfig {
   // 返回副本以防止修改
   const result = { ...config };
   
-  // 对于 level1 和 level2，应用 BENCHMARK_TIME_LIMIT 环境变量
+  // 对于 level1 和 level2，应用 BENCHMARK_TIME_LIMIT 环境变量和随机种子
   if (levelName === 'level1' || levelName === 'level2') {
     result.duration = getBenchmarkTimeLimit();
+    // 生成随机种子（用户可以通过 --seed 参数覆盖）
+    result.seed = generateRandomSeed();
   }
   
   return result;

@@ -229,9 +229,15 @@ function determineNodeTypeCounts(
   let currentTotal = Object.values(targetCounts).reduce((sum, c) => sum + c, 0);
   
   // Adjust counts to match totalNodes
-  while (currentTotal !== totalNodes) {
+  // Add a maximum iteration limit to prevent infinite loops
+  let iterations = 0;
+  const maxIterations = totalNodes * 10;
+  
+  while (currentTotal !== totalNodes && iterations < maxIterations) {
+    iterations++;
+    
     if (currentTotal < totalNodes) {
-      // Need to add nodes - pick a random type (weighted by their max proportion)
+      // Need to add nodes - pick a random type
       const typeIndex = rng.nextInt(0, types.length - 1);
       const type = types[typeIndex];
       const dist = NODE_TYPE_DISTRIBUTION[type];
@@ -241,6 +247,22 @@ function determineNodeTypeCounts(
       if (targetCounts[type] < maxCount) {
         targetCounts[type]++;
         currentTotal++;
+      } else {
+        // If all types are at max, force add to a random type (break max constraint)
+        // This happens when excludeNodeTypes reduces available capacity
+        let allAtMax = true;
+        for (const t of types) {
+          const d = NODE_TYPE_DISTRIBUTION[t];
+          if (targetCounts[t] < Math.ceil(totalNodes * d.max)) {
+            allAtMax = false;
+            break;
+          }
+        }
+        if (allAtMax) {
+          // Force add to the type with highest max proportion
+          targetCounts[type]++;
+          currentTotal++;
+        }
       }
     } else {
       // Need to remove nodes - pick a random type (avoid going below min)
@@ -253,8 +275,28 @@ function determineNodeTypeCounts(
       if (targetCounts[type] > minCount && targetCounts[type] > 1) {
         targetCounts[type]--;
         currentTotal--;
+      } else {
+        // If all types are at min, force remove from a random type
+        let allAtMin = true;
+        for (const t of types) {
+          const d = NODE_TYPE_DISTRIBUTION[t];
+          const min = Math.max(1, Math.floor(totalNodes * d.min));
+          if (targetCounts[t] > min && targetCounts[t] > 1) {
+            allAtMin = false;
+            break;
+          }
+        }
+        if (allAtMin && targetCounts[type] > 1) {
+          targetCounts[type]--;
+          currentTotal--;
+        }
       }
     }
+  }
+  
+  // If we still couldn't reach the target, log a warning
+  if (currentTotal !== totalNodes) {
+    console.warn(`[MapGenerator] Could not reach exact node count. Target: ${totalNodes}, Actual: ${currentTotal}`);
   }
   
   // Copy final counts
