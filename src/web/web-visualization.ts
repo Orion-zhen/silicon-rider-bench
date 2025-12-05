@@ -274,6 +274,8 @@ export class WebVisualization {
           weight: order.weight,
           deadline: order.deadline || 0,
           pickedUp: order.pickedUp,
+          deliveryFee: order.deliveryFee,
+          timeLimit: order.timeLimit,
         }));
         allAgentStates.push({
           id: agentId,

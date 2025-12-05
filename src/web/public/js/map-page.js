@@ -30,6 +30,7 @@ function renderMapPage() {
           <div class="map-page-section-header">
             <span class="section-icon">🎮</span>
             <span class="section-title">游戏状态</span>
+            <span class="model-name-badge" id="map-model-name">--</span>
           </div>
           <div class="dashboard-grid">
             <div class="dashboard-item">
@@ -189,6 +190,7 @@ class MapPage {
     this.elements.mapContainer = this.pageElement.querySelector('#map-page-container');
     // Game status
     this.elements.connectionStatus = this.pageElement.querySelector('#map-connection-status');
+    this.elements.modelName = this.pageElement.querySelector('#map-model-name');
     this.elements.gameTime = this.pageElement.querySelector('#map-game-time');
     this.elements.gameTurn = this.pageElement.querySelector('#map-game-turn');
     this.elements.tokensLast = this.pageElement.querySelector('#map-tokens-last');
@@ -461,6 +463,16 @@ class MapPage {
    * @param {Object} state
    */
   updateGameStatus(state) {
+    // Update model name badge
+    if (this.elements.modelName) {
+      const modelName = state.modelName || this.dataStore.get('modelName') || '--';
+      // Extract short name (after last /)
+      const shortName = modelName.includes('/') 
+        ? modelName.substring(modelName.lastIndexOf('/') + 1) 
+        : modelName;
+      this.elements.modelName.textContent = shortName;
+    }
+    
     if (this.elements.gameTime) {
       this.elements.gameTime.textContent = state.formattedTime || '--:--';
     }
@@ -629,58 +641,112 @@ class MapPage {
     // Agent colors (matching map-renderer.js)
     const agentColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
     
-    const cardsHTML = allAgentStates.map((agent, index) => {
+    // Build agent status cards
+    const agentCardsHTML = allAgentStates.map((agent, index) => {
       const agentId = agent.id || `agent_${index + 1}`;
       const displayId = agentId.replace('agent_', '#');
       const color = agentColors[index % agentColors.length];
       const battery = agent.battery !== undefined ? agent.battery : 100;
       const profit = agent.profit !== undefined ? agent.profit : 0;
       const completedOrders = agent.completedOrders !== undefined ? agent.completedOrders : 0;
-      const carriedOrders = agent.carriedOrders || [];
       
       // Battery color
       let batteryClass = 'good';
       if (battery < 20) batteryClass = 'critical';
       else if (battery < 50) batteryClass = 'warning';
       
-      // Carried orders display
-      const ordersHTML = carriedOrders.length > 0 
-        ? carriedOrders.map(order => {
-            const statusIcon = order.pickedUp ? '📦' : '📋';
-            return `<span class="mini-order-badge" title="${order.name || '订单'}">${statusIcon}</span>`;
-          }).join('')
-        : '<span class="no-orders-text">无</span>';
-      
       return `
-        <div class="agent-card" data-agent-id="${agentId}" style="border-left-color: ${color};">
-          <div class="agent-card-header">
-            <span class="agent-card-id" style="background-color: ${color};">🛵 ${displayId}</span>
-            <span class="agent-card-profit">¥${profit.toFixed(2)}</span>
+        <div class="agent-status-card" data-agent-id="${agentId}">
+          <!-- Left: Agent badge -->
+          <div class="agent-badge" style="background-color: ${color};">
+            <span class="badge-icon">🛵</span>
+            <span class="badge-id">${displayId}</span>
           </div>
-          <div class="agent-card-body">
-            <div class="agent-card-stat">
-              <span class="stat-label">电量</span>
-              <div class="mini-battery-display">
-                <div class="mini-battery-bar">
-                  <div class="mini-battery-fill ${batteryClass}" style="width: ${Math.min(100, Math.max(0, battery))}%"></div>
+          
+          <!-- Right: Stats table -->
+          <div class="agent-stats-table">
+            <!-- Header row -->
+            <div class="stats-row stats-header">
+              <div class="stats-cell battery-cell">电量</div>
+              <div class="stats-cell">完成</div>
+              <div class="stats-cell">收益</div>
+            </div>
+            <!-- Value row -->
+            <div class="stats-row stats-values">
+              <div class="stats-cell battery-cell">
+                <div class="battery-progress">
+                  <div class="battery-progress-bar">
+                    <div class="battery-progress-fill ${batteryClass}" style="width: ${Math.min(100, Math.max(0, battery))}%"></div>
+                  </div>
+                  <span class="battery-percent">${battery.toFixed(0)}%</span>
                 </div>
-                <span class="mini-battery-text">${battery.toFixed(0)}%</span>
               </div>
-            </div>
-            <div class="agent-card-stat">
-              <span class="stat-label">完成</span>
-              <span class="stat-value">${completedOrders}</span>
-            </div>
-            <div class="agent-card-stat">
-              <span class="stat-label">携带</span>
-              <div class="carried-orders-mini">${ordersHTML}</div>
+              <div class="stats-cell">
+                <span class="stat-number">${completedOrders}</span>
+              </div>
+              <div class="stats-cell">
+                <span class="stat-profit">¥${profit.toFixed(2)}</span>
+              </div>
             </div>
           </div>
         </div>
       `;
     }).join('');
     
-    this.elements.multiAgentCards.innerHTML = cardsHTML;
+    // Build order detail cards for all agents
+    const orderCardsHTML = allAgentStates.flatMap((agent, agentIndex) => {
+      const agentId = agent.id || `agent_${agentIndex + 1}`;
+      const displayId = agentId.replace('agent_', '#');
+      const color = agentColors[agentIndex % agentColors.length];
+      const carriedOrders = agent.carriedOrders || [];
+      
+      return carriedOrders.map(order => {
+        const statusIcon = order.pickedUp ? '📦' : '📋';
+        const statusText = order.pickedUp ? '已取餐' : '待取餐';
+        const orderName = order.name || '未知订单';
+        const deliveryFee = order.deliveryFee !== undefined ? order.deliveryFee : 0;
+        const deadline = order.timeLimit ? `${order.timeLimit.toFixed(1)}分钟` : '--';
+        
+        return `
+          <div class="order-detail-card" style="border-left-color: ${color};">
+            <div class="order-card-header">
+              <span class="order-agent-tag" style="background-color: ${color};">${displayId}</span>
+              <span class="order-status ${order.pickedUp ? 'picked' : 'pending'}">${statusIcon} ${statusText}</span>
+            </div>
+            <div class="order-card-body">
+              <div class="order-info-row">
+                <span class="order-label">餐品</span>
+                <span class="order-value order-name">${orderName}</span>
+              </div>
+              <div class="order-info-row">
+                <span class="order-label">配送费</span>
+                <span class="order-value order-fee">¥${deliveryFee.toFixed(1)}</span>
+              </div>
+              <div class="order-info-row">
+                <span class="order-label">限时</span>
+                <span class="order-value order-deadline">${deadline}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+    }).join('');
+    
+    // Combine: agent cards + order cards section
+    const hasOrders = allAgentStates.some(a => a.carriedOrders && a.carriedOrders.length > 0);
+    const ordersSection = hasOrders ? `
+      <div class="carried-orders-section">
+        <div class="carried-orders-header">
+          <span class="section-icon">📦</span>
+          <span class="section-label">携带订单</span>
+        </div>
+        <div class="order-cards-container">
+          ${orderCardsHTML}
+        </div>
+      </div>
+    ` : '';
+    
+    this.elements.multiAgentCards.innerHTML = agentCardsHTML + ordersSection;
   }
   
   /**

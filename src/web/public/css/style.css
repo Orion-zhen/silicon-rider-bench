@@ -2123,7 +2123,7 @@ a:focus,
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--spacing-lg);
+    padding: var(--spacing-sm);
 }
 
 .map-page-map-wrapper {
@@ -2181,15 +2181,30 @@ a:focus,
 }
 
 .section-icon {
-    font-size: 1rem;
+    font-size: 1.5rem;
 }
 
 .section-title {
-    font-size: 0.8rem;
+    font-size: 1.2rem;
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+/* Model name badge */
+.model-name-badge {
+    margin-left: auto;
+    padding: 4px 12px;
+    background: linear-gradient(135deg, var(--accent-sumire), var(--accent-fuji));
+    color: var(--text-light);
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
 }
 
 /* Dashboard Grid */
@@ -2211,7 +2226,7 @@ a:focus,
 }
 
 .dashboard-label {
-    font-size: 0.65rem;
+    font-size: 0.975rem;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -2219,7 +2234,7 @@ a:focus,
 }
 
 .dashboard-value {
-    font-size: 1.25rem;
+    font-size: 1.875rem;
     font-weight: 700;
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;
@@ -2233,8 +2248,8 @@ a:focus,
 /* Connection Status Bar */
 .connection-bar {
     display: inline-block;
-    width: 40px;
-    height: 12px;
+    width: 60px;
+    height: 18px;
     border-radius: var(--radius-full);
     background: var(--text-muted);
     transition: background 0.3s ease, box-shadow 0.3s ease;
@@ -2868,7 +2883,7 @@ a:focus,
 @media (max-width: 768px) {
     .map-page-left {
         max-height: 40vh;
-        padding: var(--spacing-sm);
+        padding: var(--spacing-xs);
     }
     
     .agent-info-grid {
@@ -3021,10 +3036,10 @@ a:focus,
    =================================== */
 
 .map-multi-agent-section {
-    padding: var(--spacing-md);
     background: var(--bg-card);
-    border-radius: var(--radius-md);
-    margin: var(--spacing-md);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+    box-shadow: var(--shadow-sm);
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -3037,68 +3052,250 @@ a:focus,
     gap: var(--spacing-sm);
     overflow-y: auto;
     flex: 1;
-    padding-right: var(--spacing-xs);
+    padding: var(--spacing-sm);
 }
 
-.agent-card {
+/* ===================================
+   Agent Status Card (Table Layout)
+   =================================== */
+.agent-status-card {
     background: var(--bg-secondary);
     border-radius: var(--radius-md);
-    padding: var(--spacing-sm) var(--spacing-md);
-    border-left: 4px solid var(--accent-primary);
+    display: flex;
+    overflow: hidden;
     transition: all 0.2s ease;
 }
 
-.agent-card:hover {
+.agent-status-card:hover {
     background: var(--bg-hover);
-    transform: translateX(2px);
 }
 
-.agent-card-header {
+/* Left: Agent badge */
+.agent-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 75px;
+    padding: var(--spacing-md);
+    color: var(--text-light);
+}
+
+.agent-badge .badge-icon {
+    font-size: 1.95rem;
+    line-height: 1;
+}
+
+.agent-badge .badge-id {
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-top: 6px;
+}
+
+/* Right: Stats table */
+.agent-stats-table {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.stats-row {
+    display: flex;
+}
+
+.stats-cell {
+    flex: 1;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-left: 1px solid var(--border-light);
+}
+
+.stats-cell.battery-cell {
+    flex: 2;
+}
+
+/* Header row */
+.stats-row.stats-header {
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.stats-row.stats-header .stats-cell {
+    font-size: 1.05rem;
+    color: var(--text-secondary);
+    padding: 9px 12px;
+}
+
+/* Values row */
+.stats-row.stats-values .stats-cell {
+    padding: 8px;
+}
+
+.stat-number {
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.stat-profit {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--success-green);
+}
+
+/* Battery progress in table */
+.battery-progress {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.battery-progress-bar {
+    flex: 1;
+    height: 18px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.battery-progress-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+    border-radius: var(--radius-sm);
+}
+
+.battery-progress-fill.good {
+    background: linear-gradient(90deg, #4CAF50, #8BC34A);
+}
+
+.battery-progress-fill.warning {
+    background: linear-gradient(90deg, #FFA726, #FFB74D);
+}
+
+.battery-progress-fill.critical {
+    background: linear-gradient(90deg, #EF5350, #E57373);
+}
+
+.battery-percent {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 52px;
+    text-align: right;
+}
+
+/* ===================================
+   Carried Orders Section
+   =================================== */
+.carried-orders-section {
+    margin-top: var(--spacing-sm);
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--border-light);
+}
+
+.carried-orders-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+    padding: 0 var(--spacing-xs);
+}
+
+.carried-orders-header .section-icon {
+    font-size: 1.35rem;
+}
+
+.carried-orders-header .section-label {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.order-cards-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+/* Order Detail Card */
+.order-detail-card {
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-primary);
+    padding: var(--spacing-sm);
+}
+
+.order-card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: var(--spacing-xs);
 }
 
-.agent-card-id {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: 2px 8px;
+.order-agent-tag {
+    display: inline-block;
+    padding: 3px 9px;
     border-radius: var(--radius-sm);
-    font-size: 0.75rem;
+    font-size: 0.975rem;
     font-weight: 600;
     color: var(--text-light);
 }
 
-.agent-card-profit {
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: var(--success-green);
-}
-
-.agent-card-body {
-    display: flex;
-    gap: var(--spacing-md);
-    align-items: center;
-    flex-wrap: wrap;
-}
-
-.agent-card-stat {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-}
-
-.agent-card-stat .stat-label {
-    font-size: 0.7rem;
+.order-status {
+    font-size: 1.05rem;
     color: var(--text-secondary);
 }
 
-.agent-card-stat .stat-value {
-    font-size: 0.8rem;
-    font-weight: 600;
+.order-status.picked {
+    color: var(--success-green);
+}
+
+.order-status.pending {
+    color: var(--warning-orange);
+}
+
+.order-card-body {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-xs);
+}
+
+.order-info-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.order-label {
+    font-size: 0.975rem;
+    color: var(--text-muted);
+}
+
+.order-value {
+    font-size: 1.125rem;
+    font-weight: 500;
     color: var(--text-primary);
+}
+
+.order-value.order-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.order-value.order-fee {
+    color: var(--success-green);
+    font-weight: 600;
+}
+
+.order-value.order-deadline {
+    color: var(--warning-orange);
 }
 
 /* Mini battery display for agent cards */
