@@ -15,6 +15,7 @@ class SettingsPage {
     
     // Load saved settings
     this.submenuMode = localStorage.getItem('mapSubmenuMode') || 'brief';
+    this.panelOpacity = parseFloat(localStorage.getItem('mapPanelOpacity') || '0.9');
     
     this.initialize();
   }
@@ -38,11 +39,15 @@ class SettingsPage {
     this.elements = {
       languageSelect: this.container.querySelector('#language-select'),
       submenuToggle: this.container.querySelector('#submenu-display-toggle'),
+      opacitySlider: this.container.querySelector('#panel-opacity-slider'),
+      opacityValue: this.container.querySelector('#panel-opacity-value'),
       settingsTitle: this.container.querySelector('#settings-title'),
       languageLabel: this.container.querySelector('#language-label'),
       languageDesc: this.container.querySelector('#language-desc'),
       submenuLabel: this.container.querySelector('#submenu-label'),
       submenuDesc: this.container.querySelector('#submenu-desc'),
+      opacityLabel: this.container.querySelector('#opacity-label'),
+      opacityDesc: this.container.querySelector('#opacity-desc'),
       themeLabel: this.container.querySelector('#theme-label'),
       themeDesc: this.container.querySelector('#theme-desc'),
       aboutLabel: this.container.querySelector('#about-label'),
@@ -70,6 +75,14 @@ class SettingsPage {
           const value = option.dataset.value;
           this.setSubmenuMode(value);
         }
+      });
+    }
+    
+    // Panel opacity slider
+    if (this.elements.opacitySlider) {
+      this.elements.opacitySlider.addEventListener('input', (e) => {
+        const opacity = parseFloat(e.target.value);
+        this.setPanelOpacity(opacity);
       });
     }
   }
@@ -112,6 +125,35 @@ class SettingsPage {
    */
   getSubmenuMode() {
     return this.submenuMode;
+  }
+  
+  /**
+   * Set panel opacity
+   * @param {number} opacity - Opacity value between 0 and 1
+   */
+  setPanelOpacity(opacity) {
+    this.panelOpacity = opacity;
+    
+    // Save to localStorage
+    localStorage.setItem('mapPanelOpacity', opacity.toString());
+    
+    // Update display value
+    if (this.elements.opacityValue) {
+      this.elements.opacityValue.textContent = Math.round(opacity * 100) + '%';
+    }
+    
+    // Update mapPage if available
+    if (this.app && this.app.mapPage) {
+      this.app.mapPage.setPanelOpacity(opacity);
+    }
+  }
+  
+  /**
+   * Get current panel opacity
+   * @returns {number}
+   */
+  getPanelOpacity() {
+    return this.panelOpacity;
   }
 
   /**
@@ -168,6 +210,7 @@ class SettingsPage {
 function renderSettingsPage() {
   const currentLang = i18n.getLanguage();
   const currentSubmenuMode = localStorage.getItem('mapSubmenuMode') || 'brief';
+  const currentPanelOpacity = parseFloat(localStorage.getItem('mapPanelOpacity') || '0.9');
   
   return `
     <div class="settings-page">
@@ -213,6 +256,27 @@ function renderSettingsPage() {
               </div>
               <div class="toggle-slider" style="transform: translateX(${currentSubmenuMode === 'off' ? '0' : currentSubmenuMode === 'brief' ? '100' : '200'}%)"></div>
             </div>
+          </div>
+        </div>
+        
+        <!-- Panel Opacity Setting -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <div class="settings-icon">👁️</div>
+            <div class="settings-section-info">
+              <h3 class="settings-label" id="opacity-label">面板不透明度</h3>
+              <p class="settings-desc" id="opacity-desc">调整操作列表和小票面板的不透明度</p>
+            </div>
+          </div>
+          <div class="settings-control opacity-control">
+            <input type="range" 
+                   id="panel-opacity-slider" 
+                   class="opacity-slider" 
+                   min="0.1" 
+                   max="1" 
+                   step="0.05" 
+                   value="${currentPanelOpacity}">
+            <span id="panel-opacity-value" class="opacity-value">${Math.round(currentPanelOpacity * 100)}%</span>
           </div>
         </div>
         

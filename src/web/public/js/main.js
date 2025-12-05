@@ -505,19 +505,27 @@ class Application {
     });
 
     this.connectionManager.on('conversation', (message) => {
-      this.handleConversation(message.data);
+      // Include agentId from message (for multi-agent mode)
+      const data = { ...message.data, agentId: message.agentId };
+      this.handleConversation(data);
     });
 
     this.connectionManager.on('reasoning', (message) => {
-      this.handleReasoning(message.data);
+      // Include agentId from message (for multi-agent mode)
+      const data = { ...message.data, agentId: message.agentId };
+      this.handleReasoning(data);
     });
 
     this.connectionManager.on('tool_call', (message) => {
-      this.handleToolCall(message.data);
+      // Include agentId from message (for multi-agent mode)
+      const data = { ...message.data, agentId: message.agentId };
+      this.handleToolCall(data);
     });
 
     this.connectionManager.on('tool_result', (message) => {
-      this.handleToolResult(message.data);
+      // Include agentId from message (for multi-agent mode)
+      const data = { ...message.data, agentId: message.agentId };
+      this.handleToolResult(data);
     });
 
     this.connectionManager.on('simulation_end', (message) => {
@@ -545,6 +553,11 @@ class Application {
         this.mapRenderer.setModelName(data.config.modelName);
       }
       
+      // Enable multi-agent mode if agents are provided (Level 3)
+      if (data.agents && data.agents.length > 1) {
+        this.mapRenderer.enableMultiAgentMode(data.agents);
+      }
+      
       this.mapRenderer.render();
     }
     
@@ -554,6 +567,11 @@ class Application {
       
       if (data.config && data.config.modelName) {
         this.mapPage.mapRenderer.setModelName(data.config.modelName);
+      }
+      
+      // Enable multi-agent mode if agents are provided (Level 3)
+      if (data.agents && data.agents.length > 1) {
+        this.mapPage.mapRenderer.enableMultiAgentMode(data.agents);
       }
       
       this.mapPage.mapRenderer.render();
@@ -575,46 +593,80 @@ class Application {
     // Update data store
     dataStore.handleStateUpdate(data);
 
+    // Check if multi-agent mode
+    const isMultiAgentMode = data.allAgentStates && data.allAgentStates.length > 1;
+
     // Update map renderer (homepage)
-    if (this.mapRenderer && data.agentState) {
-      this.mapRenderer.updateAgentPosition(data.agentState.position);
+    if (this.mapRenderer) {
+      if (isMultiAgentMode) {
+        // Multi-agent mode: update all agent positions
+        this.mapRenderer.updateAllAgentPositions(data.allAgentStates);
+      } else if (data.agentState) {
+        // Single agent mode
+        this.mapRenderer.updateAgentPosition(data.agentState.position);
+      }
       this.mapRenderer.render();
     }
     
     // Update map page renderer and status panel
     if (this.mapPage) {
       // Update map renderer
-      if (this.mapPage.mapRenderer && data.agentState) {
-        this.mapPage.mapRenderer.updateAgentPosition(data.agentState.position);
+      if (this.mapPage.mapRenderer) {
+        if (isMultiAgentMode) {
+          // Enable multi-agent mode if not already
+          if (!this.mapPage.mapRenderer.isMultiAgentMode) {
+            this.mapPage.mapRenderer.enableMultiAgentMode(data.allAgentStates);
+          }
+          this.mapPage.mapRenderer.updateAllAgentPositions(data.allAgentStates);
+        } else if (data.agentState) {
+          this.mapPage.mapRenderer.updateAgentPosition(data.agentState.position);
+        }
         this.mapPage.mapRenderer.render();
       }
       
-      // Update game status (time, turn, tokens)
+      // Update game status (time, turn, tokens) - include allAgentStates for total profit
       this.mapPage.updateGameStatus({
         formattedTime: data.formattedTime,
         currentIteration: data.currentIteration,
         maxIterations: data.maxIterations,
         lastTotalTokens: data.lastTotalTokens,
         cumulativeTotalTokens: data.cumulativeTotalTokens,
+        allAgentStates: data.allAgentStates,
       });
       
       // Update agent state (position, battery, profit, orders)
-      if (data.agentState) {
+      if (isMultiAgentMode) {
+        // Multi-agent mode: update all agent states
+        this.mapPage.updateAllAgentStates(data.allAgentStates);
+      } else if (data.agentState) {
         this.mapPage.updateAgentState(data.agentState);
       }
     }
 
     // Update stats panel
     if (this.statsPanel) {
-      this.statsPanel.update(
-        data.agentState,
-        data.formattedTime,
-        data.currentIteration,
-        data.maxIterations,
-        data.lastTotalTokens,
-        data.cumulativeTotalTokens,
-        data.currentTime
-      );
+      // For multi-agent mode, pass the total profit and all agent states
+      if (isMultiAgentMode) {
+        this.statsPanel.updateMultiAgent(
+          data.allAgentStates,
+          data.formattedTime,
+          data.currentIteration,
+          data.maxIterations,
+          data.lastTotalTokens,
+          data.cumulativeTotalTokens,
+          data.currentTime
+        );
+      } else {
+        this.statsPanel.update(
+          data.agentState,
+          data.formattedTime,
+          data.currentIteration,
+          data.maxIterations,
+          data.lastTotalTokens,
+          data.cumulativeTotalTokens,
+          data.currentTime
+        );
+      }
     }
   }
 
@@ -717,16 +769,16 @@ class Application {
     if (this.mapRenderer) {
       this.mapRenderer.showActionPanel(actionHtml, 'tool-call');
       
-      // Show critical hit animation
+      // Show critical hit animation (pass agentId for multi-agent mode)
       if (criticalHitMap[data.toolName]) {
-        this.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName]);
+        this.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName], data.agentId);
       }
     }
     
     // Show critical hit animation on map page (but no action panel)
     if (this.mapPage && this.mapPage.mapRenderer) {
       if (criticalHitMap[data.toolName]) {
-        this.mapPage.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName]);
+        this.mapPage.mapRenderer.showCriticalHitAnimation(criticalHitMap[data.toolName], data.agentId);
       }
     }
     
@@ -736,10 +788,10 @@ class Application {
       this.pendingSonarToolName = data.toolName;
       
       if (this.mapRenderer) {
-        this.mapRenderer.showSonarAnimation(radius);
+        this.mapRenderer.showSonarAnimation(radius, null, data.agentId);
       }
       if (this.mapPage && this.mapPage.mapRenderer) {
-        this.mapPage.mapRenderer.showSonarAnimation(radius);
+        this.mapPage.mapRenderer.showSonarAnimation(radius, null, data.agentId);
       }
     }
     

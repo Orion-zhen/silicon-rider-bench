@@ -54,11 +54,15 @@ function renderMapPage() {
               <span class="dashboard-label">总计Tokens</span>
               <span class="dashboard-value" id="map-tokens-total">0</span>
             </div>
+            <div class="dashboard-item" id="map-total-profit-item" style="display: none;">
+              <span class="dashboard-label">总盈利</span>
+              <span class="dashboard-value profit" id="map-total-profit">¥0.00</span>
+            </div>
           </div>
         </div>
         
-        <!-- Agent Status Dashboard -->
-        <div class="map-dashboard-section">
+        <!-- Single Agent Status Dashboard (for Level 1/2) -->
+        <div class="map-dashboard-section" id="single-agent-section">
           <div class="map-page-section-header">
             <span class="section-icon">🤖</span>
             <span class="section-title">代理状态</span>
@@ -93,8 +97,8 @@ function renderMapPage() {
           </div>
         </div>
         
-        <!-- Carried Orders Section -->
-        <div class="map-orders-section">
+        <!-- Carried Orders Section (for Level 1/2) -->
+        <div class="map-orders-section" id="single-orders-section">
           <div class="map-page-section-header">
             <span class="section-icon">📦</span>
             <span class="section-title">携带订单</span>
@@ -102,6 +106,18 @@ function renderMapPage() {
           </div>
           <div class="orders-scroll-container" id="map-orders-list">
             <div class="no-orders">暂无订单</div>
+          </div>
+        </div>
+        
+        <!-- Multi-Agent Cards Section (for Level 3) -->
+        <div class="map-multi-agent-section" id="multi-agent-section" style="display: none;">
+          <div class="map-page-section-header">
+            <span class="section-icon">🛵</span>
+            <span class="section-title">骑手状态</span>
+            <span class="agents-count" id="map-agents-count">0</span>
+          </div>
+          <div class="multi-agent-cards-container" id="multi-agent-cards">
+            <!-- Agent cards will be rendered here -->
           </div>
         </div>
         
@@ -118,8 +134,10 @@ class MapPage {
     this.pageElement = pageElement;
     this.dataStore = dataStoreRef;
     this.mapRenderer = null;
-    this.actionMenu = null;
-    this.receiptPanel = null; // Receipt panel for V2 mode
+    this.actionMenu = null; // Single agent mode ActionMenu
+    this.receiptPanel = null; // Single agent mode ReceiptPanel
+    this.actionMenus = new Map(); // Multi-agent mode: agentId -> ActionMenu
+    this.receiptPanels = new Map(); // Multi-agent mode: agentId -> ReceiptPanel
     this.agents = new Map(); // agentId -> agent state
     this.activeAgentId = 'default';
     this.submenuDisplayMode = 'brief'; // 'off', 'brief', 'full'
@@ -133,20 +151,32 @@ class MapPage {
       gameTurn: null,
       tokensLast: null,
       tokensTotal: null,
-      // Agent status
+      totalProfitItem: null,
+      totalProfit: null,
+      // Single agent status
+      singleAgentSection: null,
       agentTabs: null,
       toolCalls: null,
       completedOrders: null,
       agentProfit: null,
       agentBattery: null,
       batteryFill: null,
-      // Orders
+      // Single agent orders
+      singleOrdersSection: null,
       ordersCount: null,
       ordersList: null,
+      // Multi-agent mode
+      multiAgentSection: null,
+      agentsCount: null,
+      multiAgentCards: null,
     };
     
-    // Track tool calls count
+    // Track tool calls count per agent
     this.toolCallsCount = 0;
+    this.toolCallsCounts = new Map(); // agentId -> count
+    
+    // Track multi-agent mode
+    this.isMultiAgentMode = false;
     
     this.initialize();
   }
@@ -163,16 +193,24 @@ class MapPage {
     this.elements.gameTurn = this.pageElement.querySelector('#map-game-turn');
     this.elements.tokensLast = this.pageElement.querySelector('#map-tokens-last');
     this.elements.tokensTotal = this.pageElement.querySelector('#map-tokens-total');
-    // Agent status
+    this.elements.totalProfitItem = this.pageElement.querySelector('#map-total-profit-item');
+    this.elements.totalProfit = this.pageElement.querySelector('#map-total-profit');
+    // Single agent status
+    this.elements.singleAgentSection = this.pageElement.querySelector('#single-agent-section');
     this.elements.agentTabs = this.pageElement.querySelector('#map-agent-tabs');
     this.elements.toolCalls = this.pageElement.querySelector('#map-tool-calls');
     this.elements.completedOrders = this.pageElement.querySelector('#map-completed-orders');
     this.elements.agentProfit = this.pageElement.querySelector('#map-agent-profit');
     this.elements.agentBattery = this.pageElement.querySelector('#map-agent-battery');
     this.elements.batteryFill = this.pageElement.querySelector('#map-battery-fill');
-    // Orders
+    // Single agent orders
+    this.elements.singleOrdersSection = this.pageElement.querySelector('#single-orders-section');
     this.elements.ordersCount = this.pageElement.querySelector('#map-orders-count');
     this.elements.ordersList = this.pageElement.querySelector('#map-orders-list');
+    // Multi-agent mode
+    this.elements.multiAgentSection = this.pageElement.querySelector('#multi-agent-section');
+    this.elements.agentsCount = this.pageElement.querySelector('#map-agents-count');
+    this.elements.multiAgentCards = this.pageElement.querySelector('#multi-agent-cards');
     
     // Initialize MapRenderer
     if (typeof MapRenderer !== 'undefined' && this.elements.mapContainer) {
@@ -187,33 +225,47 @@ class MapPage {
           this.mapRenderer.setModelName(state.modelName);
         }
         
-        // Set agent position FIRST, then render
-        if (state.agentState && state.agentState.position) {
+        // Check for multi-agent mode (Level 3)
+        if (state.isMultiAgentMode && state.allAgentStates && state.allAgentStates.length > 1) {
+          // Enable multi-agent mode
+          this.mapRenderer.enableMultiAgentMode(state.allAgentStates);
+          this.mapRenderer.updateAllAgentPositions(state.allAgentStates);
+        } else if (state.agentState && state.agentState.position) {
+          // Single agent mode - Set agent position FIRST, then render
           this.mapRenderer.agentPosition = state.agentState.position;
         }
         
-        // Render will create the agentElement
+        // Render will create the agentElement(s)
         this.mapRenderer.render();
       }
     }
     
-    // Initialize ActionMenu AFTER mapRenderer has rendered (with a small delay to ensure agentElement exists)
+    // Initialize ActionMenu and ReceiptPanel AFTER mapRenderer has rendered
     if (typeof ActionMenu !== 'undefined' && this.mapRenderer && this.elements.mapContainer) {
+      const state = this.dataStore.getState();
+      
       // Use requestAnimationFrame to ensure DOM is updated
       requestAnimationFrame(() => {
-        this.actionMenu = new ActionMenu(this.elements.mapContainer, this.mapRenderer);
-        
-        // Load saved submenu mode from localStorage
+        // Load saved settings from localStorage
         const savedMode = localStorage.getItem('mapSubmenuMode') || 'brief';
+        const savedOpacity = parseFloat(localStorage.getItem('mapPanelOpacity') || '0.9');
         this.submenuDisplayMode = savedMode;
-        this.actionMenu.setDisplayMode(savedMode);
-      });
-    }
-    
-    // Initialize ReceiptPanel for V2 mode
-    if (typeof ReceiptPanel !== 'undefined' && this.mapRenderer && this.elements.mapContainer) {
-      requestAnimationFrame(() => {
-        this.receiptPanel = new ReceiptPanel(this.elements.mapContainer, this.mapRenderer);
+        
+        // Check for multi-agent mode
+        if (state.isMultiAgentMode && state.allAgentStates && state.allAgentStates.length > 1) {
+          // Multi-agent mode: create ActionMenu and ReceiptPanel for each agent
+          this.initializeMultiAgentPanels(state.allAgentStates);
+        } else {
+          // Single agent mode
+          this.actionMenu = new ActionMenu(this.elements.mapContainer, this.mapRenderer);
+          this.actionMenu.setDisplayMode(savedMode);
+          this.actionMenu.setOpacity(savedOpacity);
+          
+          if (typeof ReceiptPanel !== 'undefined') {
+            this.receiptPanel = new ReceiptPanel(this.elements.mapContainer, this.mapRenderer);
+            this.receiptPanel.setOpacity(savedOpacity);
+          }
+        }
       });
     }
     
@@ -241,16 +293,84 @@ class MapPage {
   }
   
   /**
+   * Initialize ActionMenu and ReceiptPanel for each agent (multi-agent mode)
+   * @param {Array} agentStates - Array of agent state objects
+   */
+  initializeMultiAgentPanels(agentStates) {
+    if (!this.elements.mapContainer || !this.mapRenderer) return;
+    
+    const savedMode = localStorage.getItem('mapSubmenuMode') || 'brief';
+    const savedOpacity = parseFloat(localStorage.getItem('mapPanelOpacity') || '0.9');
+    
+    agentStates.forEach(agent => {
+      const agentId = agent.id;
+      
+      // Create ActionMenu for this agent
+      if (typeof ActionMenu !== 'undefined' && !this.actionMenus.has(agentId)) {
+        const menu = new ActionMenu(this.elements.mapContainer, this.mapRenderer, agentId);
+        menu.setDisplayMode(savedMode);
+        menu.setOpacity(savedOpacity);
+        this.actionMenus.set(agentId, menu);
+      }
+      
+      // Create ReceiptPanel for this agent
+      if (typeof ReceiptPanel !== 'undefined' && !this.receiptPanels.has(agentId)) {
+        const panel = new ReceiptPanel(this.elements.mapContainer, this.mapRenderer, agentId);
+        panel.setOpacity(savedOpacity);
+        this.receiptPanels.set(agentId, panel);
+      }
+      
+      // Initialize tool calls count for this agent
+      if (!this.toolCallsCounts.has(agentId)) {
+        this.toolCallsCounts.set(agentId, 0);
+      }
+    });
+    
+    console.log(`[MapPage] Initialized ${this.actionMenus.size} ActionMenus and ${this.receiptPanels.size} ReceiptPanels`);
+  }
+  
+  /**
    * Set submenu display mode (called from settings page)
    * @param {string} mode - 'off', 'brief', 'full'
    */
   setSubmenuDisplayMode(mode) {
     this.submenuDisplayMode = mode;
     
-    // Update ActionMenu
+    // Update single ActionMenu
     if (this.actionMenu) {
       this.actionMenu.setDisplayMode(mode);
     }
+    
+    // Update all ActionMenus (multi-agent mode)
+    this.actionMenus.forEach(menu => {
+      menu.setDisplayMode(mode);
+    });
+  }
+  
+  /**
+   * Set panel opacity (called from settings page)
+   * @param {number} opacity - Opacity value between 0 and 1
+   */
+  setPanelOpacity(opacity) {
+    // Update single ActionMenu
+    if (this.actionMenu) {
+      this.actionMenu.setOpacity(opacity);
+    }
+    
+    // Update all ActionMenus (multi-agent mode)
+    this.actionMenus.forEach(menu => {
+      menu.setOpacity(opacity);
+    });
+    
+    // Update single ReceiptPanel
+    if (this.receiptPanel) {
+      this.receiptPanel.setOpacity(opacity);
+    }
+    
+    // Update all ReceiptPanels (multi-agent mode)
+    this.receiptPanels.forEach(panel => {
+      panel.setOpacity(opacity);
+    });
   }
   
   /**
@@ -288,8 +408,17 @@ class MapPage {
     // Update game status
     this.updateGameStatus(state);
     
-    // Update agent state
-    this.updateAgentState(state.agentState);
+    // Check for multi-agent mode
+    const isMultiAgentMode = state.isMultiAgentMode && state.allAgentStates && state.allAgentStates.length > 1;
+    
+    // Update agent states
+    if (isMultiAgentMode) {
+      // Multi-agent mode: update all agent states
+      this.updateAllAgentStates(state.allAgentStates);
+    } else {
+      // Single agent mode
+      this.updateAgentState(state.agentState);
+    }
     
     // Update map
     if (this.mapRenderer && state.nodes.length > 0) {
@@ -303,8 +432,22 @@ class MapPage {
         }
       }
       
-      // Set agent position FIRST (before render)
-      if (state.agentState && state.agentState.position) {
+      // Multi-agent mode handling
+      if (isMultiAgentMode) {
+        // Enable multi-agent mode if not already
+        if (!this.mapRenderer.isMultiAgentMode) {
+          this.mapRenderer.enableMultiAgentMode(state.allAgentStates);
+        }
+        this.mapRenderer.updateAllAgentPositions(state.allAgentStates);
+        
+        // Initialize multi-agent panels if not done yet
+        if (this.actionMenus.size === 0) {
+          requestAnimationFrame(() => {
+            this.initializeMultiAgentPanels(state.allAgentStates);
+          });
+        }
+      } else if (state.agentState && state.agentState.position) {
+        // Single agent mode - Set agent position FIRST (before render)
         this.mapRenderer.agentPosition = state.agentState.position;
       }
       
@@ -337,6 +480,17 @@ class MapPage {
       const tokensTotal = state.cumulativeTotalTokens || 0;
       this.elements.tokensTotal.textContent = tokensTotal.toLocaleString();
     }
+    
+    // Update total profit for multi-agent mode
+    if (state.allAgentStates && state.allAgentStates.length > 1) {
+      const totalProfit = state.allAgentStates.reduce((sum, agent) => sum + (agent.profit || 0), 0);
+      if (this.elements.totalProfit) {
+        this.elements.totalProfit.textContent = `¥${totalProfit.toFixed(2)}`;
+      }
+      if (this.elements.totalProfitItem) {
+        this.elements.totalProfitItem.style.display = '';
+      }
+    }
   }
   
   /**
@@ -354,11 +508,14 @@ class MapPage {
   }
   
   /**
-   * Update agent state
+   * Update agent state (single agent mode)
    * @param {Object} agentState
    */
   updateAgentState(agentState) {
     if (!agentState) return;
+    
+    // Switch to single agent mode UI
+    this.setSingleAgentMode();
     
     // Get agent ID (default to 'default' for backward compatibility)
     const agentId = agentState.id || 'default';
@@ -377,6 +534,153 @@ class MapPage {
     if (agentId === this.activeAgentId) {
       this.updateAgentInfoPanel();
     }
+  }
+  
+  /**
+   * Update all agent states (multi-agent mode / Level 3)
+   * @param {Array} allAgentStates - Array of agent state objects
+   */
+  updateAllAgentStates(allAgentStates) {
+    if (!allAgentStates || allAgentStates.length === 0) return;
+    
+    // Switch to multi-agent mode UI
+    this.setMultiAgentMode();
+    
+    // Update agents count
+    if (this.elements.agentsCount) {
+      this.elements.agentsCount.textContent = allAgentStates.length;
+    }
+    
+    // Store all agent states
+    allAgentStates.forEach(agentState => {
+      const agentId = agentState.id || `agent_${this.agents.size + 1}`;
+      const modelName = agentState.modelName || this.dataStore.get('modelName') || 'Unknown';
+      this.agents.set(agentId, {
+        ...agentState,
+        modelName: modelName,
+      });
+    });
+    
+    // Render all agent cards
+    this.renderAllAgentCards(allAgentStates);
+  }
+  
+  /**
+   * Switch to single agent mode UI
+   */
+  setSingleAgentMode() {
+    if (this.isMultiAgentMode) {
+      this.isMultiAgentMode = false;
+      
+      // Show single agent sections
+      if (this.elements.singleAgentSection) {
+        this.elements.singleAgentSection.style.display = '';
+      }
+      if (this.elements.singleOrdersSection) {
+        this.elements.singleOrdersSection.style.display = '';
+      }
+      
+      // Hide multi-agent section
+      if (this.elements.multiAgentSection) {
+        this.elements.multiAgentSection.style.display = 'none';
+      }
+      
+      // Hide total profit
+      if (this.elements.totalProfitItem) {
+        this.elements.totalProfitItem.style.display = 'none';
+      }
+    }
+  }
+  
+  /**
+   * Switch to multi-agent mode UI
+   */
+  setMultiAgentMode() {
+    if (!this.isMultiAgentMode) {
+      this.isMultiAgentMode = true;
+      
+      // Hide single agent sections
+      if (this.elements.singleAgentSection) {
+        this.elements.singleAgentSection.style.display = 'none';
+      }
+      if (this.elements.singleOrdersSection) {
+        this.elements.singleOrdersSection.style.display = 'none';
+      }
+      
+      // Show multi-agent section
+      if (this.elements.multiAgentSection) {
+        this.elements.multiAgentSection.style.display = '';
+      }
+      
+      // Show total profit
+      if (this.elements.totalProfitItem) {
+        this.elements.totalProfitItem.style.display = '';
+      }
+    }
+  }
+  
+  /**
+   * Render all agent cards
+   * @param {Array} allAgentStates
+   */
+  renderAllAgentCards(allAgentStates) {
+    if (!this.elements.multiAgentCards) return;
+    
+    // Agent colors (matching map-renderer.js)
+    const agentColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
+    
+    const cardsHTML = allAgentStates.map((agent, index) => {
+      const agentId = agent.id || `agent_${index + 1}`;
+      const displayId = agentId.replace('agent_', '#');
+      const color = agentColors[index % agentColors.length];
+      const battery = agent.battery !== undefined ? agent.battery : 100;
+      const profit = agent.profit !== undefined ? agent.profit : 0;
+      const completedOrders = agent.completedOrders !== undefined ? agent.completedOrders : 0;
+      const carriedOrders = agent.carriedOrders || [];
+      
+      // Battery color
+      let batteryClass = 'good';
+      if (battery < 20) batteryClass = 'critical';
+      else if (battery < 50) batteryClass = 'warning';
+      
+      // Carried orders display
+      const ordersHTML = carriedOrders.length > 0 
+        ? carriedOrders.map(order => {
+            const statusIcon = order.pickedUp ? '📦' : '📋';
+            return `<span class="mini-order-badge" title="${order.name || '订单'}">${statusIcon}</span>`;
+          }).join('')
+        : '<span class="no-orders-text">无</span>';
+      
+      return `
+        <div class="agent-card" data-agent-id="${agentId}" style="border-left-color: ${color};">
+          <div class="agent-card-header">
+            <span class="agent-card-id" style="background-color: ${color};">🛵 ${displayId}</span>
+            <span class="agent-card-profit">¥${profit.toFixed(2)}</span>
+          </div>
+          <div class="agent-card-body">
+            <div class="agent-card-stat">
+              <span class="stat-label">电量</span>
+              <div class="mini-battery-display">
+                <div class="mini-battery-bar">
+                  <div class="mini-battery-fill ${batteryClass}" style="width: ${Math.min(100, Math.max(0, battery))}%"></div>
+                </div>
+                <span class="mini-battery-text">${battery.toFixed(0)}%</span>
+              </div>
+            </div>
+            <div class="agent-card-stat">
+              <span class="stat-label">完成</span>
+              <span class="stat-value">${completedOrders}</span>
+            </div>
+            <div class="agent-card-stat">
+              <span class="stat-label">携带</span>
+              <div class="carried-orders-mini">${ordersHTML}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    this.elements.multiAgentCards.innerHTML = cardsHTML;
   }
   
   /**
@@ -506,24 +810,60 @@ class MapPage {
   }
   
   /**
+   * Get ActionMenu for specific agent (multi-agent mode) or default
+   * @param {string} agentId - Agent ID
+   * @returns {ActionMenu|null}
+   */
+  getActionMenuForAgent(agentId) {
+    if (agentId && this.actionMenus.has(agentId)) {
+      return this.actionMenus.get(agentId);
+    }
+    return this.actionMenu;
+  }
+  
+  /**
+   * Get ReceiptPanel for specific agent (multi-agent mode) or default
+   * @param {string} agentId - Agent ID
+   * @returns {ReceiptPanel|null}
+   */
+  getReceiptPanelForAgent(agentId) {
+    if (agentId && this.receiptPanels.has(agentId)) {
+      return this.receiptPanels.get(agentId);
+    }
+    return this.receiptPanel;
+  }
+  
+  /**
    * Handle tool call event
    * @param {Object} data - Tool call data
    */
   handleToolCall(data) {
+    const agentId = data.agentId;
+    
     // Increment tool calls count
-    this.toolCallsCount++;
+    if (agentId && this.toolCallsCounts.has(agentId)) {
+      this.toolCallsCounts.set(agentId, this.toolCallsCounts.get(agentId) + 1);
+    } else {
+      this.toolCallsCount++;
+    }
+    
     if (this.elements.toolCalls) {
       this.elements.toolCalls.textContent = this.toolCallsCount.toString();
     }
     
-    if (this.actionMenu) {
-      this.actionMenu.highlightAction('tool', data.toolName);
-      this.actionMenu.showSubmenu('tool', data);
+    // Get ActionMenu for this agent
+    const actionMenu = this.getActionMenuForAgent(agentId);
+    if (actionMenu) {
+      actionMenu.highlightAction('tool', data.toolName);
+      actionMenu.showSubmenu('tool', data);
     }
     
     // Handle move_to: schedule receipt panel to hide after 2s
-    if (data.toolName === 'move_to' && this.receiptPanel && this.receiptPanel.isShowing()) {
-      this.receiptPanel.scheduleHide();
+    if (data.toolName === 'move_to') {
+      const receiptPanel = this.getReceiptPanelForAgent(agentId);
+      if (receiptPanel && receiptPanel.isShowing()) {
+        receiptPanel.scheduleHide();
+      }
     }
   }
   
@@ -532,19 +872,23 @@ class MapPage {
    * @param {Object} data - Tool result data
    */
   handleToolResult(data) {
-    if (this.actionMenu) {
-      this.actionMenu.highlightAction('result');
-      this.actionMenu.showSubmenu('result', data);
+    const agentId = data.agentId;
+    
+    // Get ActionMenu for this agent
+    const actionMenu = this.getActionMenuForAgent(agentId);
+    if (actionMenu) {
+      actionMenu.highlightAction('result');
+      actionMenu.showSubmenu('result', data);
     }
     
     // Handle get_receipts result: show receipt panel
     if (data.toolName === 'get_receipts' && data.success && data.result) {
-      this.handleGetReceiptsResult(data.result);
+      this.handleGetReceiptsResult(data.result, agentId);
     }
     
     // Handle pickup_food_by_phone_number result: highlight the picked up receipt
     if (data.toolName === 'pickup_food_by_phone_number' && data.success && data.result) {
-      this.handlePickupByPhoneResult(data.result);
+      this.handlePickupByPhoneResult(data.result, agentId);
     }
   }
   
@@ -552,9 +896,11 @@ class MapPage {
    * Handle get_receipts tool result
    * Shows the receipt panel with receipt images
    * @param {Object} result - Tool result data
+   * @param {string} agentId - Agent ID
    */
-  handleGetReceiptsResult(result) {
-    if (!this.receiptPanel) {
+  handleGetReceiptsResult(result, agentId) {
+    const receiptPanel = this.getReceiptPanelForAgent(agentId);
+    if (!receiptPanel) {
       return;
     }
     
@@ -562,7 +908,7 @@ class MapPage {
     const receipts = resultData.receipts || [];
     
     if (receipts.length > 0) {
-      this.receiptPanel.showReceipts(receipts);
+      receiptPanel.showReceipts(receipts);
     }
   }
   
@@ -570,15 +916,17 @@ class MapPage {
    * Handle pickup_food_by_phone_number tool result
    * Highlights the selected receipt with green glow
    * @param {Object} result - Tool result data
+   * @param {string} agentId - Agent ID
    */
-  handlePickupByPhoneResult(result) {
-    if (!this.receiptPanel) return;
+  handlePickupByPhoneResult(result, agentId) {
+    const receiptPanel = this.getReceiptPanelForAgent(agentId);
+    if (!receiptPanel) return;
     
     const resultData = result.data || result;
     const orderId = resultData.orderId;
     
     if (orderId) {
-      this.receiptPanel.highlightReceipt(orderId);
+      receiptPanel.highlightReceipt(orderId);
     }
   }
   
@@ -587,7 +935,15 @@ class MapPage {
    * @param {Object} data - Conversation data
    */
   handleConversation(data) {
-    if (this.actionMenu && data.role === 'assistant') {
+    if (data.role !== 'assistant') return;
+    
+    // In multi-agent mode, broadcast to all ActionMenus (conversation is global)
+    if (this.actionMenus.size > 0) {
+      this.actionMenus.forEach(menu => {
+        menu.highlightAction('message', null, data.content);
+        menu.showSubmenu('message', data);
+      });
+    } else if (this.actionMenu) {
       this.actionMenu.highlightAction('message', null, data.content);
       this.actionMenu.showSubmenu('message', data);
     }
@@ -598,7 +954,13 @@ class MapPage {
    * @param {Object} data - Reasoning data
    */
   handleReasoning(data) {
-    if (this.actionMenu) {
+    // In multi-agent mode, broadcast to all ActionMenus (reasoning is global)
+    if (this.actionMenus.size > 0) {
+      this.actionMenus.forEach(menu => {
+        menu.highlightAction('thinking', null, data.content);
+        menu.showSubmenu('thinking', data);
+      });
+    } else if (this.actionMenu) {
       this.actionMenu.highlightAction('thinking', null, data.content);
       this.actionMenu.showSubmenu('thinking', data);
     }
@@ -608,13 +970,24 @@ class MapPage {
    * Cleanup resources
    */
   cleanup() {
+    // Cleanup single agent mode panels
     if (this.actionMenu) {
       this.actionMenu.cleanup();
     }
-    
     if (this.receiptPanel) {
       this.receiptPanel.cleanup();
     }
+    
+    // Cleanup multi-agent mode panels
+    this.actionMenus.forEach(menu => {
+      menu.cleanup();
+    });
+    this.actionMenus.clear();
+    
+    this.receiptPanels.forEach(panel => {
+      panel.cleanup();
+    });
+    this.receiptPanels.clear();
   }
 }
 

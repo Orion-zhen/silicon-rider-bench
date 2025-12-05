@@ -303,6 +303,107 @@ function generateV2WorkflowPrompt(): string {
 - 每个订单都必须调用 deliver_food 才能获得配送费！`;
 }
 
+// ============================================================================
+// V3 版本提示词（多骑手模式）
+// ============================================================================
+
+/**
+ * 生成 V3 版本的工具说明（多骑手模式）
+ * 所有工具都需要 agent_id 参数
+ */
+function generateV3ToolsPrompt(riderCount: number): string {
+  const agentIds = Array.from({ length: riderCount }, (_, i) => `agent_${i + 1}`).join(', ');
+  
+  return `
+## 可用工具
+你需要同时操作 ${riderCount} 个骑手（${agentIds}）来完成配送任务。
+**所有工具调用都必须指定 agent_id 参数来指定操作哪个骑手！**
+一次对话支持同时调用多个工具，可以对不同骑手发出命令。
+
+### 信息查询类
+- **get_my_status(agent_id)**: 查询指定骑手的状态（位置、电量、订单、利润等）
+- **get_map(agent_id)**: 获取完整地图信息（位置列表按类型分组 + 邻接表连接关系）
+- **search_nearby_orders(agent_id, radius)**: 搜索指定骑手附近的可用订单
+- **search_nearby_battery_stations(agent_id, radius)**: 搜索指定骑手附近的换电站
+- **get_location_info(agent_id, locationId)**: 获取位置详细信息
+- **calculate_distance(agent_id, fromId, toId)**: 计算两点间最短距离
+- **estimate_time(agent_id, locationIds)**: 估算路径通行时间（考虑拥堵）
+- **help(agent_id)**: 显示此帮助信息
+
+### 行动类
+- **accept_order(agent_id, orderId)**: 指定骑手接受订单（每个骑手最多 5 单，总重量不超过 10kg）
+- **move_to(agent_id, targetLocationId)**: 指定骑手移动到目标位置
+- **get_receipts(agent_id, targetLocationId)**: 获取小票图片（需要识别手机号）
+- **pickup_food_by_phone_number(agent_id, phoneNumber)**: 通过手机号取餐
+- **deliver_food(agent_id, orderId)**: 送餐（耗时 1 分钟）
+- **swap_battery(agent_id)**: 在换电站换电（耗时 1 分钟，花费 0.5 元）
+- **wait(agent_id, minutes)**: 等待指定分钟数（1-60）
+
+### ⚠️ 重要：agent_id 参数
+- 所有工具调用都必须包含 **agent_id** 参数
+- 可用的 agent_id: ${agentIds}
+- 你可以在一次响应中同时对多个骑手发出命令
+
+### ⚠️ 重要：取餐流程
+取餐需要通过识别小票图片来获取手机号：
+1. 到达取餐点后，调用 **get_receipts(agent_id, targetLocationId)** 获取小票图片
+2. 仔细观察小票图片，识别上面的手机号（格式如 172****3882）
+3. 使用识别到的手机号调用 **pickup_food_by_phone_number(agent_id, phoneNumber)** 完成取餐`;
+}
+
+/**
+ * 生成 V3 版本的规则说明（多骑手模式）
+ */
+function generateV3RulesPrompt(riderCount: number): string {
+  return `
+## 重要规则
+1. **多骑手协作**：你需要同时操作 ${riderCount} 个骑手，合理分配任务以最大化总利润
+2. **共享订单池**：所有骑手共享同一个订单池，一个订单只能被一个骑手接单
+3. **利润汇总**：所有骑手的利润会汇总计算，作为最终成绩
+4. **独立状态**：每个骑手有独立的位置、电量、携带订单等状态
+5. **电量管理**：每个骑手满电续航 50km，电量耗尽后只能推行（10km/h）
+6. **承载限制**：每个骑手最多携带 5 单，总重量不超过 10kg
+7. **订单类型**：本场景只有外卖订单（0.5-1kg）
+8. **超时惩罚**：
+   - 0-5 分钟：无惩罚
+   - 5-10 分钟：扣除 30% 配送费
+   - 10-15 分钟：扣除 50% 配送费
+   - 15 分钟以上：扣除 70% 配送费
+9. **拥堵影响**：道路拥堵会降低速度（30/25/20/15 km/h）`;
+}
+
+/**
+ * 生成 V3 版本的配送流程说明（多骑手模式）
+ */
+function generateV3WorkflowPrompt(riderCount: number): string {
+  const agentIds = Array.from({ length: riderCount }, (_, i) => `agent_${i + 1}`).join(', ');
+  
+  return `
+## 配送流程（必须严格遵守）
+每个骑手完成一个订单的完整流程：
+1. **search_nearby_orders(agent_id, radius)** - 搜索可用订单
+2. **accept_order(agent_id, orderId)** - 接受订单（订单被接受后其他骑手不可见）
+3. **move_to(agent_id, targetLocationId)** - 移动到取餐点
+4. **get_receipts(agent_id, targetLocationId)** - 获取小票图片
+5. **识别手机号** - 观察小票图片，找到手机号
+6. **pickup_food_by_phone_number(agent_id, phoneNumber)** - 使用手机号取餐
+7. **move_to(agent_id, targetLocationId)** - 移动到送餐点
+8. **deliver_food(agent_id, orderId)** - 送餐
+
+## 多骑手策略建议
+- **并行操作**：可以同时对多个骑手发出命令，提高效率
+- **区域分工**：可以让不同骑手负责不同区域，减少竞争
+- **抢单策略**：热门订单要快速抢单，避免被"其他骑手"抢走
+- **路径规划**：为每个骑手规划高效路线，避免空驶
+- **电量管理**：关注每个骑手的电量，及时安排换电
+- **利润最大化**：在有限时间内完成尽可能多的订单
+
+## 开始任务
+你现在控制 ${riderCount} 个骑手（${agentIds}）。
+请开始配送任务，通过合理调度所有骑手来最大化总利润。
+记住：所有工具调用都必须指定 agent_id 参数！`;
+}
+
 /**
  * 生成系统提示词
  * 
@@ -317,6 +418,8 @@ function generateV2WorkflowPrompt(): string {
 export function generateSystemPrompt(simulator: Simulator, currentIteration?: number): string {
   const isLevel01 = simulator.isLevel01Mode();
   const isLevel2 = simulator.isLevel2Mode();
+  const isLevel3 = simulator.isLevel3Mode();
+  const riderCount = simulator.getRiderCount();
   const agentState = simulator.getAgentState();
   const maxIterations = getMaxIterations();
   const toolCallFormat = getToolCallFormat();
@@ -337,12 +440,35 @@ export function generateSystemPrompt(simulator: Simulator, currentIteration?: nu
   }
 
   // 根据版本生成不同的工具说明、规则和流程
-  const toolsPrompt = isLevel2 ? generateV2ToolsPrompt() : generateV1ToolsPrompt();
-  const rulesPrompt = isLevel2 ? generateV2RulesPrompt() : generateV1RulesPrompt();
-  const workflowPrompt = isLevel2 ? generateV2WorkflowPrompt() : generateV1WorkflowPrompt(isLevel01);
+  let toolsPrompt: string;
+  let rulesPrompt: string;
+  let workflowPrompt: string;
+  
+  if (isLevel3) {
+    toolsPrompt = generateV3ToolsPrompt(riderCount);
+    rulesPrompt = generateV3RulesPrompt(riderCount);
+    workflowPrompt = generateV3WorkflowPrompt(riderCount);
+  } else if (isLevel2) {
+    toolsPrompt = generateV2ToolsPrompt();
+    rulesPrompt = generateV2RulesPrompt();
+    workflowPrompt = generateV2WorkflowPrompt();
+  } else {
+    toolsPrompt = generateV1ToolsPrompt();
+    rulesPrompt = generateV1RulesPrompt();
+    workflowPrompt = generateV1WorkflowPrompt(isLevel01);
+  }
 
   // 策略建议
-  const strategyPrompt = `
+  const strategyPrompt = isLevel3 
+    ? `
+## 策略建议
+- 你的核心任务是同时调度 ${riderCount} 个骑手，在有限时间内达成最大的总盈利
+- 合理分配订单给不同骑手，避免抢单冲突
+- 可以让不同骑手负责不同区域，减少路径重叠
+- 一次响应中可以同时对多个骑手发出命令，提高效率
+- 注意评估每个骑手的电量，及时安排换电
+- 在能力范围内让每个骑手多接单，但需要考虑各自的配送上限和重量上限`
+    : `
 ## 策略建议
 - 你的核心任务是在有限时间内达成最大的盈利, 因此需要在一次性多接单, 配送费, 重量, 距离, 剩余电量等环境变量之间找到平衡, 并综合考虑
 - 合理规划路线，减少空驶, 既可以在送餐的过程中接单或取餐或换电, 也可以在取餐的过程中送餐或接单或换电
@@ -350,16 +476,29 @@ export function generateSystemPrompt(simulator: Simulator, currentIteration?: nu
 - 考虑订单时限，避免超时
 - 在能力范围内一次性多接单, 但需要考虑配送上限和重量上限`;
 
+  // 确定版本标题
+  let versionTitle = '';
+  if (isLevel3) {
+    versionTitle = ' (V3 多骑手版)';
+  } else if (isLevel2) {
+    versionTitle = ' (V2 多模态版)';
+  }
+
   // 静态部分 - 放在前面以最大化 KV Cache 复用
   const staticPrompt = `
-# Silicon Rider Bench - AI 外卖骑手模拟${isLevel2 ? ' (V2 多模态版)' : ''}
+# Silicon Rider Bench - AI 外卖骑手模拟${versionTitle}
 
-你是一个 AI 外卖骑手，在虚拟城市中配送订单以赚取利润。
+${isLevel3 
+  ? `你是一个 AI 调度员，同时操控 ${riderCount} 个外卖骑手在虚拟城市中配送订单以赚取利润。`
+  : '你是一个 AI 外卖骑手，在虚拟城市中配送订单以赚取利润。'
+}
 
 ## 目标
 ${isLevel01 
   ? '完成单个配送订单，验证基本功能。' 
-  : '在有限时间和轮次内最大化利润。'
+  : isLevel3
+    ? `同时调度 ${riderCount} 个骑手，在有限时间和轮次内最大化总利润。`
+    : '在有限时间和轮次内最大化利润。'
 }
 ${toolCallInstructions}
 ${toolsPrompt}
@@ -388,8 +527,37 @@ ${workflowPrompt}`;
   const remainingTimeDisplay = formatRemainingTime(remainingTime);
 
   // 动态部分 - 放在最后以最小化 KV Cache 逐出
-  const dynamicPrompt = isLevel01 
-    ? `
+  let dynamicPrompt: string;
+  
+  if (isLevel3) {
+    // Level 3: 显示所有骑手的状态
+    const allAgentStates = simulator.getAllAgentStates();
+    let agentsStatus = '';
+    for (const [agentId, state] of allAgentStates) {
+      agentsStatus += `
+### ${agentId}
+- 位置：${state.getPosition()}
+- 电量：${state.getBattery()}%（续航 ${state.getBatteryRange().toFixed(1)} km）
+- 携带订单：${state.getCarriedOrders().length}/5
+- 总重量：${state.getTotalWeight().toFixed(1)}/10 kg
+- 利润：¥${state.getProfit().toFixed(2)}
+`;
+    }
+    
+    const totalProfit = simulator.getTotalProfit();
+    
+    dynamicPrompt = `
+
+---
+## 当前状态
+- 当前时间：${simulator.getFormattedTime()}（剩余 ${remainingTimeDisplay}）
+- 对话轮次：${iterationDisplay}
+- 总利润：¥${totalProfit.toFixed(2)}
+
+## 各骑手状态
+${agentsStatus}`;
+  } else if (isLevel01) {
+    dynamicPrompt = `
 
 ---
 ## 当前状态
@@ -397,8 +565,9 @@ ${workflowPrompt}`;
 - 电量：${agentState.getBattery()}%（续航 ${agentState.getBatteryRange().toFixed(1)} km）
 - 携带订单：${agentState.getCarriedOrders().length}/5
 - 总重量：${agentState.getTotalWeight().toFixed(1)}/10 kg
-- 当前利润：¥${agentState.getProfit().toFixed(2)}`
-    : `
+- 当前利润：¥${agentState.getProfit().toFixed(2)}`;
+  } else {
+    dynamicPrompt = `
 
 ---
 ## 当前状态
@@ -409,6 +578,7 @@ ${workflowPrompt}`;
 - 携带订单：${agentState.getCarriedOrders().length}/5
 - 总重量：${agentState.getTotalWeight().toFixed(1)}/10 kg
 - 当前利润：¥${agentState.getProfit().toFixed(2)}`;
+  }
 
   const prompt = (staticPrompt + dynamicPrompt).trim(); 
 

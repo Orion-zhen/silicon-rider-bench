@@ -16,7 +16,7 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { Simulator } from '../core/simulator';
 import { ToolCallRequest, ImageTransportMode } from '../types';
-import { createToolRegistry } from '../tools';
+import { createToolRegistry, createToolRegistryV3 } from '../tools';
 import { generateSystemPrompt } from './system-prompt';
 import type { WebVisualization } from '../web/web-visualization.js';
 
@@ -228,6 +228,12 @@ export class AIClient {
    * @returns OpenAI 格式的工具定义数组
    */
   private generateToolDefinitions(): any[] {
+    // Check if V3 mode (multi-rider mode with agent_id parameter)
+    if (this.simulator.isLevel3Mode()) {
+      const registry = createToolRegistryV3();
+      return registry.toOpenAIFormat();
+    }
+    
     // Check if V2 mode (use multimodal tools)
     const v2Mode = this.simulator.isLevel2Mode();
     const registry = createToolRegistry(v2Mode);
@@ -595,6 +601,10 @@ export class AIClient {
             for (const toolCall of effectiveToolCalls) {
               try {
                 const args = JSON.parse(toolCall.function.arguments);
+                // Level 3: 从参数中获取 agent_id，设置到 webVisualization
+                if (args.agent_id) {
+                  this.webVisualization.setAgentId(args.agent_id);
+                }
                 this.webVisualization.sendToolCall(toolCall.function.name, args);
               } catch (error) {
                 // 如果参数解析失败，发送原始字符串
@@ -622,6 +632,19 @@ export class AIClient {
 
             // 发送工具结果到 Web 客户端
             if (this.webVisualization) {
+              // Level 3: 从对应的工具调用中获取 agent_id
+              const matchingToolCall = effectiveToolCalls.find(tc => tc.id === result.toolCallId);
+              if (matchingToolCall) {
+                try {
+                  const args = JSON.parse(matchingToolCall.function.arguments);
+                  if (args.agent_id) {
+                    this.webVisualization.setAgentId(args.agent_id);
+                  }
+                } catch (e) {
+                  // 忽略解析错误
+                }
+              }
+              
               const success = result.result.success !== false;
               this.webVisualization.sendToolResult(result.toolName, success, result.result);
             }

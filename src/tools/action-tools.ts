@@ -740,3 +740,79 @@ export function getActionToolsV2(): ToolDefinition[] {
     waitTool,
   ];
 }
+
+// ============================================================================
+// V3 版本工具（多骑手模式）
+// 所有工具都需要 agent_id 参数来指定操作哪个骑手
+// ============================================================================
+
+/**
+ * 将 V1/V2 工具转换为 V3 版本
+ * V3 版本的工具会在参数中添加 agent_id
+ */
+function createV3ActionTool(baseTool: ToolDefinition): ToolDefinition {
+  return {
+    name: baseTool.name,
+    description: baseTool.description + '（需要指定 agent_id）',
+    parameters: {
+      agent_id: {
+        type: 'string',
+        required: true,
+        description: '骑手 ID（如 agent_1, agent_2, agent_3）',
+      },
+      ...baseTool.parameters,
+    },
+    handler: baseTool.handler,
+  };
+}
+
+/**
+ * V3 版本：接受订单
+ */
+export const acceptOrderToolV3 = createV3ActionTool(acceptOrderTool);
+
+/**
+ * V3 版本：移动到目标位置
+ */
+export const moveToToolV3 = createV3ActionTool(moveToTool);
+
+/**
+ * V3 版本：获取小票
+ */
+export const getReceiptsToolV3 = createV3ActionTool(getReceiptsTool);
+
+/**
+ * V3 版本：通过手机号取餐
+ */
+export const pickupFoodByPhoneToolV3 = createV3ActionTool(pickupFoodByPhoneTool);
+
+/**
+ * V3 版本：送餐
+ */
+export const deliverFoodToolV3 = createV3ActionTool(deliverFoodTool);
+
+/**
+ * V3 版本：换电
+ */
+export const swapBatteryToolV3 = createV3ActionTool(swapBatteryTool);
+
+/**
+ * V3 版本：等待
+ */
+export const waitToolV3 = createV3ActionTool(waitTool);
+
+/**
+ * 获取 V3 模式的行动工具（多骑手模式）
+ * 基于 V2 的多模态取餐流程，所有工具都需要 agent_id 参数
+ */
+export function getActionToolsV3(): ToolDefinition[] {
+  return [
+    acceptOrderToolV3,
+    moveToToolV3,
+    getReceiptsToolV3,
+    pickupFoodByPhoneToolV3,
+    deliverFoodToolV3,
+    swapBatteryToolV3,
+    waitToolV3,
+  ];
+}

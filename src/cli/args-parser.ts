@@ -42,6 +42,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CLIArgs {
           parsed.level = 'level1';
         } else if (levelValue === '2') {
           parsed.level = 'level2';
+        } else if (levelValue === '3') {
+          parsed.level = 'level3';
         } else if (isValidLevelName(levelValue)) {
           parsed.level = levelValue as LevelName;
         } else {

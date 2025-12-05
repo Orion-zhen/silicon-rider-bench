@@ -211,10 +211,11 @@ Silicon Rider Bench - AI 外卖骑手基准测试
   npm run level0.1              运行 Level 0.1（教程场景）
   npm run level1                运行 Level 1（完整基准测试）
   npm run level2                运行 Level 2（V2 多模态测试）
+  npm run level3                运行 Level 3（V3 多骑手测试）
   npm run dev -- [options]      使用自定义选项运行
 
 选项:
-  --level, -l <level>           指定 Level（0.1, 1, 或 2）
+  --level, -l <level>           指定 Level（0.1, 1, 2, 或 3）
   --seed, -s <seed>             指定地图种子（覆盖默认值）
   --model, -m <model>           指定 AI 模型名称
   --base-url <url>              指定 API 基础 URL（用于本地 llama.cpp 等）
@@ -229,11 +230,13 @@ Level 说明:
   Level 0.1                     教程场景：简单地图，单个订单
   Level 1                       完整基准测试：24小时，持续订单生成
   Level 2 (V2)                  多模态测试：使用真实小票图片，需识别手机号取餐
+  Level 3 (V3)                  多骑手测试：一个AI同时操作多个骑手，共享订单池
 
 示例:
   npm run dev -- --level 1 --seed 12345
   npm run dev -- --level 0.1 --no-viz --output report.md
   npm run dev -- --level 2 --mode web --port 8080
+  npm run dev -- --level 3 --mode web --port 8080
   npm run dev -- --base-url http://localhost:8080/v1 --level 0.1
 
 环境变量:
@@ -242,7 +245,8 @@ Level 说明:
   BASE_URL                      API 基础 URL（可选，本地 llama.cpp 使用如 http://localhost:8080/v1）
   MAX_ITERATIONS                最大迭代次数（0 表示无限，默认 300）
   BENCHMARK_TIME_LIMIT          基准测试时间限制，单位：小时（默认 24）
-  IMAGE_TRANSPORT_MODE          图片传输模式（base64 或 file_path，V2 多模态使用）
+  IMAGE_TRANSPORT_MODE          图片传输模式（base64 或 file_path，V2/V3 多模态使用）
+  SIMULATION_RIDER_NUM          骑手数量（Level 3 使用，默认 3，最大 10）
   `.trim());
 }
 

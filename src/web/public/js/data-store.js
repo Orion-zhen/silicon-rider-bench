@@ -33,7 +33,7 @@ class DataStore {
       cumulativePromptTokens: 0,
       cumulativeCompletionTokens: 0,
       
-      // Agent state
+      // Agent state (primary/default agent for Level 1/2)
       agentState: {
         position: '',
         battery: 100,
@@ -42,6 +42,10 @@ class DataStore {
         totalWeight: 0,
         completedOrders: 0
       },
+      
+      // Multi-agent states (Level 3)
+      allAgentStates: [], // Array of agent states
+      isMultiAgentMode: false, // Flag for Level 3 mode
       
       // Tool calls tracking
       totalToolCalls: 0,
@@ -169,6 +173,24 @@ class DataStore {
       this.state.modelName = data.config.modelName;
     }
     
+    // Check if this is Level 3 multi-agent mode
+    if (data.agents && data.agents.length > 1) {
+      this.state.isMultiAgentMode = true;
+      this.state.allAgentStates = data.agents.map(agent => ({
+        id: agent.id,
+        modelName: agent.modelName,
+        position: agent.position,
+        battery: agent.battery,
+        profit: 0,
+        carriedOrders: [],
+        totalWeight: 0,
+        completedOrders: 0
+      }));
+      console.log(`[DataStore] Multi-agent mode enabled with ${data.agents.length} agents`);
+    } else {
+      this.state.isMultiAgentMode = false;
+    }
+    
     this.notify('init', data);
     this.notify('modelName', this.state.modelName);
   }
@@ -217,6 +239,12 @@ class DataStore {
     // Update agent state
     if (data.agentState) {
       this.state.agentState = { ...this.state.agentState, ...data.agentState };
+    }
+    
+    // Update multi-agent states (Level 3)
+    if (data.allAgentStates && data.allAgentStates.length > 0) {
+      this.state.isMultiAgentMode = true;
+      this.state.allAgentStates = data.allAgentStates;
     }
     
     this.notify('stateUpdate', data);
@@ -379,8 +407,32 @@ class DataStore {
       totalWeight: 0,
       completedOrders: 0
     };
+    this.state.allAgentStates = [];
+    this.state.isMultiAgentMode = false;
     
     this.notify('clear', null);
+  }
+  
+  /**
+   * Get total profit across all agents (for Level 3)
+   * @returns {number} Total profit
+   */
+  getTotalProfit() {
+    if (this.state.isMultiAgentMode && this.state.allAgentStates.length > 0) {
+      return this.state.allAgentStates.reduce((sum, agent) => sum + (agent.profit || 0), 0);
+    }
+    return this.state.agentState.profit || 0;
+  }
+  
+  /**
+   * Get total completed orders across all agents (for Level 3)
+   * @returns {number} Total completed orders
+   */
+  getTotalCompletedOrders() {
+    if (this.state.isMultiAgentMode && this.state.allAgentStates.length > 0) {
+      return this.state.allAgentStates.reduce((sum, agent) => sum + (agent.completedOrders || 0), 0);
+    }
+    return this.state.agentState.completedOrders || 0;
   }
 }
 

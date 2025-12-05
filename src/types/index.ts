@@ -423,6 +423,7 @@ export interface LevelConfig {
   baseOrderFrequency?: number; // Level 1 使用（分钟）
   useRealReceiptData?: boolean; // Level 2 使用：是否使用真实小票数据
   excludeNodeTypes?: NodeType[]; // 排除的节点类型（V2 模式下排除超市和药店）
+  simulationRiderNum?: number;  // Level 3 使用：同时操作的骑手数量
 }
 
 // ============================================================================

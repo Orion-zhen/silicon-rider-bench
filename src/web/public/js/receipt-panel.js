@@ -11,9 +11,10 @@
  */
 
 class ReceiptPanel {
-  constructor(containerElement, mapRenderer) {
+  constructor(containerElement, mapRenderer, agentId = null) {
     this.container = containerElement;
     this.mapRenderer = mapRenderer;
+    this.agentId = agentId; // Which agent to follow (null = first agent)
     this.panelElement = null;
     
     // State
@@ -70,11 +71,34 @@ class ReceiptPanel {
     }
     
     // Get agent element's screen position using getBoundingClientRect
-    if (!this.mapRenderer.agentElement) {
+    let agentElement = null;
+    
+    // Multi-agent mode: get specific agent or first agent
+    if (this.mapRenderer.isMultiAgentMode && this.mapRenderer.agentElements.size > 0) {
+      // Try to get specific agent by agentId
+      if (this.agentId && this.mapRenderer.agentElements.has(this.agentId)) {
+        const data = this.mapRenderer.agentElements.get(this.agentId);
+        if (data.element) {
+          agentElement = data.element;
+        }
+      } else {
+        // No specific agentId, use first agent
+        for (const [id, data] of this.mapRenderer.agentElements) {
+          if (data.element) {
+            agentElement = data.element;
+            break;
+          }
+        }
+      }
+    } else {
+      agentElement = this.mapRenderer.agentElement;
+    }
+    
+    if (!agentElement) {
       return;
     }
     
-    const agentRect = this.mapRenderer.agentElement.getBoundingClientRect();
+    const agentRect = agentElement.getBoundingClientRect();
     const agentCenterX = agentRect.left + agentRect.width / 2;
     const agentCenterY = agentRect.top + agentRect.height / 2;
     
@@ -275,6 +299,16 @@ class ReceiptPanel {
    */
   isShowing() {
     return this.isVisible;
+  }
+  
+  /**
+   * Set panel opacity
+   * @param {number} opacity - Opacity value between 0 and 1
+   */
+  setOpacity(opacity) {
+    if (this.panelElement) {
+      this.panelElement.style.opacity = opacity;
+    }
   }
   
   /**

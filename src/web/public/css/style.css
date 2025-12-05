@@ -1769,6 +1769,65 @@ body {
     opacity: 0.5;
 }
 
+/* Opacity slider control */
+.opacity-control {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.opacity-slider {
+    width: 120px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--bg-tertiary);
+    outline: none;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.opacity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent-sumire);
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(112, 88, 163, 0.3);
+    transition: all var(--transition-fast);
+}
+
+.opacity-slider::-webkit-slider-thumb:hover {
+    background: var(--accent-fuji);
+    transform: scale(1.1);
+}
+
+.opacity-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent-sumire);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 6px rgba(112, 88, 163, 0.3);
+    transition: all var(--transition-fast);
+}
+
+.opacity-slider::-moz-range-thumb:hover {
+    background: var(--accent-fuji);
+    transform: scale(1.1);
+}
+
+.opacity-value {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    min-width: 45px;
+    text-align: right;
+    font-family: var(--font-mono);
+}
+
 .about-description {
     font-size: 0.9rem;
     color: var(--text-secondary);
@@ -2955,4 +3014,176 @@ a:focus,
     padding: 2px 6px;
     border-radius: var(--radius-sm);
     font-weight: 500;
+}
+
+/* ===================================
+   20. Multi-Agent Cards Styles (Level 3)
+   =================================== */
+
+.map-multi-agent-section {
+    padding: var(--spacing-md);
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    margin: var(--spacing-md);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.multi-agent-cards-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    overflow-y: auto;
+    flex: 1;
+    padding-right: var(--spacing-xs);
+}
+
+.agent-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-left: 4px solid var(--accent-primary);
+    transition: all 0.2s ease;
+}
+
+.agent-card:hover {
+    background: var(--bg-hover);
+    transform: translateX(2px);
+}
+
+.agent-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-xs);
+}
+
+.agent-card-id {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-light);
+}
+
+.agent-card-profit {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--success-green);
+}
+
+.agent-card-body {
+    display: flex;
+    gap: var(--spacing-md);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.agent-card-stat {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.agent-card-stat .stat-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+.agent-card-stat .stat-value {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Mini battery display for agent cards */
+.mini-battery-display {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mini-battery-bar {
+    width: 40px;
+    height: 8px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.mini-battery-fill {
+    height: 100%;
+    transition: width 0.3s ease, background-color 0.3s ease;
+    border-radius: var(--radius-sm);
+}
+
+.mini-battery-fill.good {
+    background: var(--success-green);
+}
+
+.mini-battery-fill.warning {
+    background: var(--warning-orange);
+}
+
+.mini-battery-fill.critical {
+    background: var(--error-red);
+}
+
+.mini-battery-text {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 30px;
+}
+
+/* Carried orders mini display */
+.carried-orders-mini {
+    display: flex;
+    gap: 2px;
+    flex-wrap: wrap;
+}
+
+.mini-order-badge {
+    font-size: 0.75rem;
+}
+
+.no-orders-text {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Agents count badge */
+.agents-count {
+    background: var(--accent-primary);
+    color: var(--text-light);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+/* Multi-agent badge styles for map */
+.agent-marker.multi-agent {
+    position: relative;
+}
+
+.multi-agent-badge {
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-light);
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }

@@ -10,9 +10,10 @@
  */
 
 class ActionMenu {
-  constructor(containerElement, mapRenderer) {
+  constructor(containerElement, mapRenderer, agentId = null) {
     this.container = containerElement;
     this.mapRenderer = mapRenderer;
+    this.agentId = agentId; // Which agent to follow (null = first agent)
     this.menuElement = null;
     this.submenuElement = null;
     this.toolLabelElement = null;
@@ -189,6 +190,30 @@ class ActionMenu {
    * Wait for agent element to be available, then update position
    */
   waitForAgentElement() {
+    // Check for multi-agent mode first
+    if (this.mapRenderer && this.mapRenderer.isMultiAgentMode && this.mapRenderer.agentElements.size > 0) {
+      // Check if our target agent has a valid element
+      let hasValidAgent = false;
+      if (this.agentId && this.mapRenderer.agentElements.has(this.agentId)) {
+        const data = this.mapRenderer.agentElements.get(this.agentId);
+        hasValidAgent = !!data.element;
+      } else {
+        // No specific agentId, check first agent
+        for (const [id, data] of this.mapRenderer.agentElements) {
+          if (data.element) {
+            hasValidAgent = true;
+            break;
+          }
+        }
+      }
+      if (hasValidAgent) {
+        this.updatePosition();
+        this.menuElement.style.opacity = '1';
+        return;
+      }
+    }
+    
+    // Single agent mode
     if (this.mapRenderer && this.mapRenderer.agentElement) {
       this.updatePosition();
       // Show menu once agent is available
@@ -211,7 +236,53 @@ class ActionMenu {
     // Try to get position from agentElement first
     let agentLeft, agentTop;
     
-    if (this.mapRenderer.agentElement) {
+    // Multi-agent mode: get position from specific agent or first agent
+    if (this.mapRenderer.isMultiAgentMode && this.mapRenderer.agentElements.size > 0) {
+      // Try to get specific agent by agentId
+      if (this.agentId && this.mapRenderer.agentElements.has(this.agentId)) {
+        const data = this.mapRenderer.agentElements.get(this.agentId);
+        if (data.element) {
+          agentLeft = parseFloat(data.element.style.left);
+          agentTop = parseFloat(data.element.style.top);
+        }
+        // Fallback: calculate from node position
+        if ((isNaN(agentLeft) || isNaN(agentTop)) && data.position) {
+          const agentNode = this.mapRenderer.nodes.get(data.position);
+          if (agentNode) {
+            const pos = this.mapRenderer.worldToScreen(agentNode.x, agentNode.y);
+            agentLeft = pos.x;
+            agentTop = pos.y;
+          }
+        }
+      } else {
+        // No specific agentId, use first agent
+        for (const [id, data] of this.mapRenderer.agentElements) {
+          if (data.element) {
+            agentLeft = parseFloat(data.element.style.left);
+            agentTop = parseFloat(data.element.style.top);
+            if (!isNaN(agentLeft) && !isNaN(agentTop)) {
+              break;
+            }
+          }
+        }
+        
+        // Fallback: calculate from node position
+        if (isNaN(agentLeft) || isNaN(agentTop)) {
+          for (const [id, data] of this.mapRenderer.agentElements) {
+            if (data.position) {
+              const agentNode = this.mapRenderer.nodes.get(data.position);
+              if (agentNode) {
+                const pos = this.mapRenderer.worldToScreen(agentNode.x, agentNode.y);
+                agentLeft = pos.x;
+                agentTop = pos.y;
+                break;
+              }
+            }
+          }
+        }
+      }
+    } else if (this.mapRenderer.agentElement) {
+      // Single agent mode
       agentLeft = parseFloat(this.mapRenderer.agentElement.style.left);
       agentTop = parseFloat(this.mapRenderer.agentElement.style.top);
     }
@@ -589,6 +660,19 @@ class ActionMenu {
     
     if (mode === 'off') {
       this.hideSubmenu();
+    }
+  }
+  
+  /**
+   * Set panel opacity
+   * @param {number} opacity - Opacity value between 0 and 1
+   */
+  setOpacity(opacity) {
+    if (this.menuElement) {
+      this.menuElement.style.opacity = opacity;
+    }
+    if (this.submenuElement) {
+      this.submenuElement.style.opacity = opacity;
     }
   }
   

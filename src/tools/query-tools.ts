@@ -30,6 +30,8 @@ import { ToolDefinition } from './tool-registry';
  */
 export interface ToolContext {
   agentState: AgentState;
+  agentStates?: Map<string, AgentState>;  // Level 3: 所有骑手状态
+  isLevel3?: boolean;                      // Level 3 模式标志
   orderGenerator: OrderGenerator;
   pathfinder: Pathfinder;
   congestionManager: CongestionManager;
@@ -631,5 +633,86 @@ export function getQueryTools(): ToolDefinition[] {
     estimateTimeTool,
     helpTool,
     getMapTool,
+  ];
+}
+
+// ============================================================================
+// V3 版本工具（多骑手模式）
+// 所有工具都需要 agent_id 参数来指定操作哪个骑手
+// ============================================================================
+
+/**
+ * 将 V1/V2 工具转换为 V3 版本
+ * V3 版本的工具会在参数中添加 agent_id
+ */
+function createV3Tool(baseTool: ToolDefinition): ToolDefinition {
+  return {
+    name: baseTool.name,
+    description: baseTool.description + '（需要指定 agent_id）',
+    parameters: {
+      agent_id: {
+        type: 'string',
+        required: true,
+        description: '骑手 ID（如 agent_1, agent_2, agent_3）',
+      },
+      ...baseTool.parameters,
+    },
+    handler: baseTool.handler,
+  };
+}
+
+/**
+ * V3 版本：获取指定骑手的状态
+ */
+export const getMyStatusToolV3 = createV3Tool(getMyStatusTool);
+
+/**
+ * V3 版本：搜索附近订单
+ */
+export const searchNearbyOrdersToolV3 = createV3Tool(searchNearbyOrdersTool);
+
+/**
+ * V3 版本：搜索附近换电站
+ */
+export const searchNearbyBatteryStationsToolV3 = createV3Tool(searchNearbyBatteryStationsTool);
+
+/**
+ * V3 版本：获取位置信息
+ */
+export const getLocationInfoToolV3 = createV3Tool(getLocationInfoTool);
+
+/**
+ * V3 版本：计算距离
+ */
+export const calculateDistanceToolV3 = createV3Tool(calculateDistanceTool);
+
+/**
+ * V3 版本：估算时间
+ */
+export const estimateTimeToolV3 = createV3Tool(estimateTimeTool);
+
+/**
+ * V3 版本：帮助工具
+ */
+export const helpToolV3 = createV3Tool(helpTool);
+
+/**
+ * V3 版本：获取地图
+ */
+export const getMapToolV3 = createV3Tool(getMapTool);
+
+/**
+ * 获取所有 V3 版本查询工具（多骑手模式）
+ */
+export function getQueryToolsV3(): ToolDefinition[] {
+  return [
+    getMyStatusToolV3,
+    searchNearbyOrdersToolV3,
+    searchNearbyBatteryStationsToolV3,
+    getLocationInfoToolV3,
+    calculateDistanceToolV3,
+    estimateTimeToolV3,
+    helpToolV3,
+    getMapToolV3,
   ];
 }

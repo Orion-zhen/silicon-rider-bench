@@ -25,9 +25,25 @@ function getBenchmarkTimeLimit(): number {
 }
 
 /**
+ * 获取模拟骑手数量（从环境变量读取）
+ * 环境变量 SIMULATION_RIDER_NUM，默认 3
+ * @returns 骑手数量
+ */
+function getSimulationRiderNum(): number {
+  const envValue = process.env.SIMULATION_RIDER_NUM;
+  if (envValue !== undefined && envValue !== '') {
+    const num = parseInt(envValue, 10);
+    if (!isNaN(num) && num > 0 && num <= 10) {
+      return num;
+    }
+  }
+  return 3; // 默认 3 个骑手
+}
+
+/**
  * Level 名称类型
  */
-export type LevelName = 'level0.1' | 'level1' | 'level2';
+export type LevelName = 'level0.1' | 'level1' | 'level2' | 'level3';
 
 /**
  * Level 配置映射
@@ -96,6 +112,27 @@ const LEVEL_CONFIGS: Record<LevelName, LevelConfig> = {
     useRealReceiptData: true,    // 使用真实小票数据
     excludeNodeTypes: ['supermarket', 'pharmacy'], // 排除超市和药店
   },
+
+  /**
+   * Level 3 - 多骑手多模态测试场景
+   * 
+   * 特点：
+   * - 基于 Level 2 的多模态取餐流程
+   * - 一个 AI 同时操作多个骑手
+   * - 共享订单池，骑手需要抢单
+   * - 所有骑手利润汇总作为最终成绩
+   * - 所有工具调用需要传入 agent_id 参数
+   * - AI 可在一次响应中同时对多个骑手发出命令
+   */
+  'level3': {
+    duration: 1440,              // 1440 分钟 = 24 小时
+    mapSize: 'large',            // 大地图
+    seed: 22222,                 // 固定种子
+    baseOrderFrequency: 5,       // 基准频率：每 5 分钟
+    useRealReceiptData: true,    // 使用真实小票数据
+    excludeNodeTypes: ['supermarket', 'pharmacy'], // 排除超市和药店
+    simulationRiderNum: 3,       // 默认 3 个骑手
+  },
 };
 
 /**
@@ -129,11 +166,16 @@ export function getLevelConfig(levelName: LevelName): LevelConfig {
   // 返回副本以防止修改
   const result = { ...config };
   
-  // 对于 level1 和 level2，应用 BENCHMARK_TIME_LIMIT 环境变量和随机种子
-  if (levelName === 'level1' || levelName === 'level2') {
+  // 对于 level1, level2 和 level3，应用 BENCHMARK_TIME_LIMIT 环境变量和随机种子
+  if (levelName === 'level1' || levelName === 'level2' || levelName === 'level3') {
     result.duration = getBenchmarkTimeLimit();
     // 生成随机种子（用户可以通过 --seed 参数覆盖）
     result.seed = generateRandomSeed();
+  }
+  
+  // 对于 level3，应用 SIMULATION_RIDER_NUM 环境变量
+  if (levelName === 'level3') {
+    result.simulationRiderNum = getSimulationRiderNum();
   }
   
   return result;
@@ -238,6 +280,7 @@ export function getLevelDescription(levelName: LevelName): string {
     'level0.1': 'Level 0.1 - 教程场景：简单地图，单个订单，验证基本工具调用流程',
     'level1': 'Level 1 - 完整基准测试：大地图，24小时周期，持续订单生成，动态拥堵',
     'level2': 'Level 2 - 多模态测试：使用真实小票数据，需识别图片中的手机号取餐',
+    'level3': 'Level 3 - 多骑手测试：一个AI同时操作多个骑手，共享订单池抢单，利润汇总',
   };
   
   return descriptions[levelName] || 'Unknown level';
@@ -274,6 +317,10 @@ export function printLevelConfig(levelName: LevelName): string {
   if (config.excludeNodeTypes && config.excludeNodeTypes.length > 0) {
     info += `- 排除节点类型: ${config.excludeNodeTypes.join(', ')}\n`;
   }
+
+  if (config.simulationRiderNum !== undefined) {
+    info += `- 骑手数量: ${config.simulationRiderNum}\n`;
+  }
   
   return info;
 }
@@ -284,3 +331,4 @@ export function printLevelConfig(levelName: LevelName): string {
 export const LEVEL_0_1_CONFIG = LEVEL_CONFIGS['level0.1'];
 export const LEVEL_1_CONFIG = LEVEL_CONFIGS['level1'];
 export const LEVEL_2_CONFIG = LEVEL_CONFIGS['level2'];
+export const LEVEL_3_CONFIG = LEVEL_CONFIGS['level3'];

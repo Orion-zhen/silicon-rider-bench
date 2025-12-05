@@ -14,7 +14,7 @@ import { generateMap } from '../world/map-generator';
 import { CongestionManager } from '../world/congestion-manager';
 import { Pathfinder } from '../world/pathfinder';
 import { ToolExecutor } from '../tools/tool-executor';
-import { createToolRegistry, ToolRegistry } from '../tools/index';
+import { createToolRegistry, createToolRegistryV3, ToolRegistry } from '../tools/index';
 import { ScoreCalculator } from '../scoring/score-calculator';
 import { ReceiptDataManager, createReceiptDataManager } from '../data/receipt-data-manager';
 
@@ -76,6 +76,11 @@ export class Simulator {
   // Level 2 (V2 多模态) 特殊处理
   private isLevel2: boolean;
   private receiptDataManager: ReceiptDataManager | null = null;
+  
+  // Level 3 (多骑手) 特殊处理
+  private isLevel3: boolean;
+  private agentStates: Map<string, AgentState> = new Map();
+  private riderCount: number = 1;
 
   /**
    * 创建模拟器实例
@@ -86,7 +91,9 @@ export class Simulator {
     this.config = config;
     this.status = 'initialized';
     this.isLevel01 = config.orderCount !== undefined && config.orderCount === 1;
-    this.isLevel2 = config.useRealReceiptData === true;
+    this.isLevel2 = config.useRealReceiptData === true && !config.simulationRiderNum;
+    this.isLevel3 = config.simulationRiderNum !== undefined && config.simulationRiderNum > 1;
+    this.riderCount = config.simulationRiderNum || 1;
     
     // 初始化统计信息
     this.stats = {
@@ -99,7 +106,7 @@ export class Simulator {
       batterySwaps: 0,
     };
     
-    // 生成地图（V2 模式排除超市和药店）
+    // 生成地图（V2/V3 模式排除超市和药店）
     const map = generateMap({
       seed: config.seed,
       size: config.mapSize,
@@ -115,32 +122,57 @@ export class Simulator {
     const endTime = startTime + config.duration; // 结束时间 = 开始时间 + 持续时间
     this.gameClock = new GameClock(startTime, endTime);
     
-    // 选择初始位置（随机选择一个节点）
+    // 选择初始位置
     const nodeIds = Array.from(this.nodes.keys());
-    const initialPosition = nodeIds[0]; // 简单起见，选择第一个节点
-    this.agentState = new AgentState(initialPosition);
+    
+    if (this.isLevel3) {
+      // Level 3: 创建多个骑手，分散在不同初始位置
+      for (let i = 0; i < this.riderCount; i++) {
+        const agentId = `agent_${i + 1}`;
+        // 尽量分散初始位置，使用模运算循环选择节点
+        const initialPosition = nodeIds[i % nodeIds.length];
+        const agentState = new AgentState(initialPosition);
+        this.agentStates.set(agentId, agentState);
+      }
+      // 默认 agentState 指向第一个骑手（向后兼容）
+      this.agentState = this.agentStates.get('agent_1')!;
+      console.log(`[Simulator] Level 3 mode enabled with ${this.riderCount} riders`);
+    } else {
+      // Level 0.1/1/2: 单个骑手
+      const initialPosition = nodeIds[0];
+      this.agentState = new AgentState(initialPosition);
+      this.agentStates.set('agent_1', this.agentState);
+    }
     
     this.orderGenerator = new OrderGenerator(config.seed);
     this.congestionManager = new CongestionManager(this.edges, this.nodes);
     this.pathfinder = new Pathfinder(this.nodes, this.edges);
     
-    // V2 模式：初始化小票数据管理器并启用 V2 模式
-    if (this.isLevel2) {
+    // V2/V3 模式：初始化小票数据管理器并启用 V2 模式
+    if (this.isLevel2 || this.isLevel3) {
       try {
         this.receiptDataManager = createReceiptDataManager();
         this.orderGenerator.setV2Mode(true, this.receiptDataManager);
         console.log('[Simulator] V2 mode enabled with real receipt data');
       } catch (error) {
         console.error('[Simulator] Failed to initialize V2 mode:', error);
-        this.isLevel2 = false;
+        if (!this.isLevel3) {
+          this.isLevel2 = false;
+        }
       }
     }
     
     // 初始化拥堵地图（使用开始时间）
     this.congestionMap = this.congestionManager.updateCongestion(startTime);
     
-    // 初始化工具系统（V2 模式使用不同的工具）
-    this.toolRegistry = createToolRegistry(this.isLevel2);
+    // 初始化工具系统
+    if (this.isLevel3) {
+      // V3 模式：使用多骑手版本的工具
+      this.toolRegistry = createToolRegistryV3();
+    } else {
+      // V1/V2 模式
+      this.toolRegistry = createToolRegistry(this.isLevel2);
+    }
     this.toolExecutor = new ToolExecutor(this.toolRegistry);
     
     // 初始化评分计算器
@@ -171,8 +203,8 @@ export class Simulator {
         deliveryNodes,
         (from, to) => this.calculateDistance(from, to)
       );
-    } else if (this.isLevel2) {
-      // Level 2 (V2): 使用真实小票数据，只有餐厅订单
+    } else if (this.isLevel2 || this.isLevel3) {
+      // Level 2/3: 使用真实小票数据，只有餐厅订单
       const pickupNodes = Array.from(this.nodes.values()).filter(
         n => n.type === 'restaurant'
       );
@@ -180,8 +212,10 @@ export class Simulator {
         n => n.type === 'residential' || n.type === 'office'
       );
       
-      // 生成 5-10 个初始订单
-      const initialOrderCount = 5 + Math.floor(Math.random() * 6);
+      // Level 3 生成更多初始订单（每个骑手 3-5 个）
+      const baseCount = this.isLevel3 ? this.riderCount * 3 : 5;
+      const extraCount = this.isLevel3 ? this.riderCount * 2 : 5;
+      const initialOrderCount = baseCount + Math.floor(Math.random() * extraCount);
       this.orderGenerator.generateOrders(
         initialOrderCount,
         currentTime,
@@ -219,9 +253,39 @@ export class Simulator {
   async executeToolCall(request: ToolCallRequest): Promise<ToolCallResponse> {
     this.stats.totalToolCalls++;
     
+    // Level 3: 从参数中获取 agent_id，确定要操作哪个骑手
+    let targetAgentState = this.agentState;
+    if (this.isLevel3) {
+      const agentId = request.parameters.agent_id as string;
+      if (!agentId) {
+        return {
+          success: false,
+          error: {
+            code: 'INVALID_PARAMETER',
+            message: 'agent_id is required in Level 3 mode',
+            details: { toolName: request.toolName },
+          },
+        };
+      }
+      const agentState = this.agentStates.get(agentId);
+      if (!agentState) {
+        return {
+          success: false,
+          error: {
+            code: 'INVALID_PARAMETER',
+            message: `Invalid agent_id: ${agentId}. Available agents: ${Array.from(this.agentStates.keys()).join(', ')}`,
+            details: { agentId, availableAgents: Array.from(this.agentStates.keys()) },
+          },
+        };
+      }
+      targetAgentState = agentState;
+    }
+    
     // 构建工具执行上下文
     const context = {
-      agentState: this.agentState,
+      agentState: targetAgentState,
+      agentStates: this.agentStates,
+      isLevel3: this.isLevel3,
       orderGenerator: this.orderGenerator,
       pathfinder: this.pathfinder,
       congestionManager: this.congestionManager,
@@ -329,8 +393,20 @@ export class Simulator {
    * 更新统计信息
    */
   private updateStats(): void {
-    this.stats.totalProfit = this.agentState.getProfit();
-    this.stats.totalDistance = this.agentState.getTotalDistance();
+    if (this.isLevel3) {
+      // Level 3: 汇总所有骑手的利润和距离
+      let totalProfit = 0;
+      let totalDistance = 0;
+      for (const agentState of this.agentStates.values()) {
+        totalProfit += agentState.getProfit();
+        totalDistance += agentState.getTotalDistance();
+      }
+      this.stats.totalProfit = totalProfit;
+      this.stats.totalDistance = totalDistance;
+    } else {
+      this.stats.totalProfit = this.agentState.getProfit();
+      this.stats.totalDistance = this.agentState.getTotalDistance();
+    }
   }
 
   /**
@@ -365,12 +441,13 @@ export class Simulator {
     
     const currentTime = this.gameClock.getCurrentTime();
     
-    // 简单实现：每次调用生成 1-3 个订单
-    const orderCount = 1 + Math.floor(Math.random() * 3);
+    // Level 3 生成更多订单以满足多骑手需求
+    const baseOrderCount = this.isLevel3 ? this.riderCount : 1;
+    const orderCount = baseOrderCount + Math.floor(Math.random() * 3);
     
-    // V2 模式只从餐厅生成订单
+    // V2/V3 模式只从餐厅生成订单
     let pickupNodes: Node[];
-    if (this.isLevel2) {
+    if (this.isLevel2 || this.isLevel3) {
       pickupNodes = Array.from(this.nodes.values()).filter(
         n => n.type === 'restaurant'
       );
@@ -548,7 +625,57 @@ export class Simulator {
   }
 
   /**
-   * 获取小票数据管理器（V2 模式）
+   * 是否是 Level 3 (多骑手模式)
+   */
+  isLevel3Mode(): boolean {
+    return this.isLevel3;
+  }
+
+  /**
+   * 获取骑手数量
+   */
+  getRiderCount(): number {
+    return this.riderCount;
+  }
+
+  /**
+   * 根据 ID 获取指定骑手状态
+   * @param agentId 骑手 ID（如 agent_1, agent_2）
+   */
+  getAgentStateById(agentId: string): AgentState | undefined {
+    return this.agentStates.get(agentId);
+  }
+
+  /**
+   * 获取所有骑手状态
+   */
+  getAllAgentStates(): Map<string, AgentState> {
+    return this.agentStates;
+  }
+
+  /**
+   * 获取所有骑手 ID 列表
+   */
+  getAgentIds(): string[] {
+    return Array.from(this.agentStates.keys());
+  }
+
+  /**
+   * 获取所有骑手利润汇总
+   */
+  getTotalProfit(): number {
+    if (this.isLevel3) {
+      let totalProfit = 0;
+      for (const agentState of this.agentStates.values()) {
+        totalProfit += agentState.getProfit();
+      }
+      return totalProfit;
+    }
+    return this.agentState.getProfit();
+  }
+
+  /**
+   * 获取小票数据管理器（V2/V3 模式）
    */
   getReceiptDataManager(): ReceiptDataManager | null {
     return this.receiptDataManager;
@@ -635,13 +762,26 @@ export class Simulator {
     const score = this.calculateFinalScore();
     const duration = this.gameClock.getElapsedTime();
     
-    return `
+    // 确定 Level 标识
+    let levelStr = '1';
+    if (this.isLevel01) levelStr = '0.1';
+    else if (this.isLevel2) levelStr = '2';
+    else if (this.isLevel3) levelStr = '3';
+    
+    let report = `
 # Silicon Rider Bench - 评测报告
 
 ## 基本信息
-- Level: ${this.isLevel01 ? '0.1' : '1'}
+- Level: ${levelStr}
 - Seed: ${this.config.seed}
-- Duration: ${GameClock.formatTime(duration)}
+- Duration: ${GameClock.formatTime(duration)}`;
+
+    if (this.isLevel3) {
+      report += `
+- 骑手数量: ${this.riderCount}`;
+    }
+
+    report += `
 
 ## 核心指标
 - **总利润**: ¥${score.profit.toFixed(2)}
@@ -654,7 +794,25 @@ export class Simulator {
 - 总行驶距离: ${this.stats.totalDistance.toFixed(1)} km
 - 换电次数: ${this.stats.batterySwaps}
 - 平均每单利润: ¥${this.stats.completedOrders > 0 ? (score.profit / this.stats.completedOrders).toFixed(2) : '0.00'}
-- 超时订单数: ${this.stats.completedOrders - this.stats.onTimeOrders}
-    `.trim();
+- 超时订单数: ${this.stats.completedOrders - this.stats.onTimeOrders}`;
+
+    // Level 3: 添加每个骑手的详细统计
+    if (this.isLevel3) {
+      report += `
+
+## 各骑手统计`;
+      for (const [agentId, agentState] of this.agentStates) {
+        report += `
+
+### ${agentId}
+- 位置: ${agentState.getPosition()}
+- 利润: ¥${agentState.getProfit().toFixed(2)}
+- 完成订单: ${agentState.getCompletedOrders()}
+- 行驶距离: ${agentState.getTotalDistance().toFixed(1)} km
+- 电量: ${agentState.getBattery()}%`;
+      }
+    }
+
+    return report.trim();
   }
 }

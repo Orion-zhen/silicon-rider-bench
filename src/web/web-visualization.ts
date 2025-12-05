@@ -142,6 +142,27 @@ export class WebVisualization {
       distance: edge.distance,
     }));
 
+    // 确定 level 标识
+    let level = '1';
+    if (this.simulator.isLevel01Mode()) level = '0.1';
+    else if (this.simulator.isLevel2Mode()) level = '2';
+    else if (this.simulator.isLevel3Mode()) level = '3';
+
+    // Level 3: 收集所有骑手信息
+    let agents: Array<{ id: string; modelName: string; position: string; battery: number }> | undefined;
+    if (this.simulator.isLevel3Mode()) {
+      const allAgentStates = this.simulator.getAllAgentStates();
+      agents = [];
+      for (const [agentId, agentState] of allAgentStates) {
+        agents.push({
+          id: agentId,
+          modelName: this.modelName,
+          position: agentState.getPosition(),
+          battery: agentState.getBattery(),
+        });
+      }
+    }
+
     const message: InitMessage = {
       type: 'init',
       timestamp: Date.now(),
@@ -149,11 +170,12 @@ export class WebVisualization {
         nodes,
         edges,
         config: {
-          level: this.simulator.isLevel01Mode() ? '0.1' : '1',
+          level,
           seed: config.seed,
           duration: config.duration,
           modelName: this.modelName,
         },
+        agents,
       },
     };
 
@@ -222,6 +244,50 @@ export class WebVisualization {
       deliveryFee: order.deliveryFee,
     }));
 
+    // Level 3: 收集所有骑手状态
+    let allAgentStates: Array<{
+      id?: string;
+      modelName?: string;
+      position: string;
+      battery: number;
+      profit: number;
+      carriedOrders: Array<{
+        id: string;
+        type: string;
+        name: string;
+        weight: number;
+        deadline: number;
+        pickedUp: boolean;
+      }>;
+      totalWeight: number;
+      completedOrders: number;
+    }> | undefined;
+    
+    if (this.simulator.isLevel3Mode()) {
+      const allStates = this.simulator.getAllAgentStates();
+      allAgentStates = [];
+      for (const [agentId, state] of allStates) {
+        const orders = state.getCarriedOrders().map(order => ({
+          id: order.id,
+          type: order.type,
+          name: order.name,
+          weight: order.weight,
+          deadline: order.deadline || 0,
+          pickedUp: order.pickedUp,
+        }));
+        allAgentStates.push({
+          id: agentId,
+          modelName: this.modelName,
+          position: state.getPosition(),
+          battery: state.getBattery(),
+          profit: state.getProfit(),
+          carriedOrders: orders,
+          totalWeight: state.getTotalWeight(),
+          completedOrders: state.getCompletedOrders(),
+        });
+      }
+    }
+
     const message: StateUpdateMessage = {
       type: 'state_update',
       timestamp: Date.now(),
@@ -247,6 +313,7 @@ export class WebVisualization {
           totalWeight: agentState.getTotalWeight(),
           completedOrders: agentState.getCompletedOrders(),
         },
+        allAgentStates,
       },
     };
 

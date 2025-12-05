@@ -56,6 +56,11 @@ class MapRenderer {
     
     // Model name for agent badge
     this.modelName = '';
+    
+    // Multi-agent support (Level 3)
+    this.isMultiAgentMode = false;
+    this.agentElements = new Map(); // agentId -> { element, position }
+    this.agentColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
   }
 
   /**
@@ -111,6 +116,208 @@ class MapRenderer {
     }
     
     badge.textContent = displayName;
+  }
+
+  /**
+   * Enable multi-agent mode (Level 3)
+   * @param {Array} agents - Array of agent info objects
+   */
+  enableMultiAgentMode(agents) {
+    this.isMultiAgentMode = true;
+    
+    // Initialize agent elements for each agent
+    agents.forEach((agent, index) => {
+      if (!this.agentElements.has(agent.id)) {
+        this.agentElements.set(agent.id, {
+          element: null,
+          position: agent.position,
+          previousPosition: null,
+          color: this.agentColors[index % this.agentColors.length],
+          isAnimating: false,
+          animationTimeout: null
+        });
+      }
+    });
+    
+    console.log(`[MapRenderer] Multi-agent mode enabled with ${agents.length} agents`);
+    this.isDirty = true;
+    this.scheduleRender();
+  }
+
+  /**
+   * Update all agent positions (multi-agent mode)
+   * @param {Array} agentStates - Array of agent state objects
+   */
+  updateAllAgentPositions(agentStates) {
+    if (!this.isMultiAgentMode || !agentStates) return;
+    
+    agentStates.forEach((state, index) => {
+      const agentId = state.id;
+      const nodeId = state.position;
+      
+      let agentData = this.agentElements.get(agentId);
+      if (!agentData) {
+        agentData = {
+          element: null,
+          position: null,
+          previousPosition: null,
+          color: this.agentColors[index % this.agentColors.length],
+          isAnimating: false
+        };
+        this.agentElements.set(agentId, agentData);
+      }
+      
+      // Update position if changed
+      if (agentData.position !== nodeId) {
+        const fromNodeId = agentData.position;
+        agentData.previousPosition = fromNodeId;
+        agentData.position = nodeId;
+        this.isDirty = true;
+        
+        // Animate element movement if it exists and we have a previous position
+        if (agentData.element && fromNodeId) {
+          this.animateMultiAgentMovement(agentId, agentData, fromNodeId, nodeId);
+        } else if (agentData.element) {
+          // No previous position, just set directly
+          const node = this.nodes.get(nodeId);
+          if (node) {
+            const screen = this.worldToScreen(node.x, node.y);
+            agentData.element.style.left = `${screen.x}px`;
+            agentData.element.style.top = `${screen.y}px`;
+          }
+        }
+      }
+    });
+    
+    if (this.isDirty) {
+      this.scheduleRender();
+    }
+  }
+  
+  /**
+   * Animate multi-agent movement from one node to another along the path
+   * @param {string} agentId - Agent ID
+   * @param {Object} agentData - Agent data object
+   * @param {string} fromNodeId - Starting node ID
+   * @param {string} toNodeId - Destination node ID
+   */
+  animateMultiAgentMovement(agentId, agentData, fromNodeId, toNodeId) {
+    const fromNode = this.nodes.get(fromNodeId);
+    const toNode = this.nodes.get(toNodeId);
+    
+    if (!fromNode || !toNode || !agentData.element) {
+      // If nodes don't exist or no element, just set position directly
+      console.warn('[MapRenderer] Cannot animate: missing node or element', { fromNodeId, toNodeId, hasElement: !!agentData.element });
+      return;
+    }
+    
+    // If already animating, cancel the previous animation and snap to fromNode
+    if (agentData.isAnimating) {
+      if (agentData.animationTimeout) {
+        clearTimeout(agentData.animationTimeout);
+        agentData.animationTimeout = null;
+      }
+      // Clear transition immediately to stop ongoing animation
+      agentData.element.style.transition = 'none';
+      // Snap to fromNode position (where the new path starts)
+      const fromScreen = this.worldToScreen(fromNode.x, fromNode.y);
+      agentData.element.style.left = `${fromScreen.x}px`;
+      agentData.element.style.top = `${fromScreen.y}px`;
+      // Force reflow to apply position immediately before new transition
+      agentData.element.offsetHeight;
+      agentData.element.style.transition = '';
+    }
+    
+    // Find path between nodes
+    const path = this.findPath(fromNodeId, toNodeId);
+    console.log('[MapRenderer] Animating agent', agentId, 'from', fromNodeId, 'to', toNodeId, 'path:', path);
+    
+    // Mark as animating
+    agentData.isAnimating = true;
+    
+    // Animate along the path
+    this.animateMultiAgentAlongPath(agentId, agentData, path, 0);
+  }
+  
+  /**
+   * Animate multi-agent along a path of nodes
+   * @param {string} agentId - Agent ID
+   * @param {Object} agentData - Agent data object
+   * @param {Array} path - Array of node IDs
+   * @param {number} index - Current path index
+   */
+  animateMultiAgentAlongPath(agentId, agentData, path, index) {
+    if (index >= path.length || !agentData.element) {
+      // Animation complete
+      agentData.isAnimating = false;
+      agentData.element.style.transition = '';
+      return;
+    }
+    
+    const nodeId = path[index];
+    const node = this.nodes.get(nodeId);
+    
+    if (!node) {
+      agentData.isAnimating = false;
+      return;
+    }
+    
+    const pos = this.worldToScreen(node.x, node.y);
+    
+    // Calculate duration based on whether this is the first segment
+    const segmentDuration = index === 0 ? 0 : this.animationDuration;
+    
+    if (index === 0) {
+      // First node, no animation
+      agentData.element.style.left = `${pos.x}px`;
+      agentData.element.style.top = `${pos.y}px`;
+      
+      // Move to next segment immediately
+      this.animateMultiAgentAlongPath(agentId, agentData, path, index + 1);
+    } else {
+      // Animate to this node
+      agentData.element.style.transition = `left ${segmentDuration}ms linear, top ${segmentDuration}ms linear`;
+      agentData.element.style.left = `${pos.x}px`;
+      agentData.element.style.top = `${pos.y}px`;
+      
+      // Move to next segment after animation completes
+      agentData.animationTimeout = setTimeout(() => {
+        this.animateMultiAgentAlongPath(agentId, agentData, path, index + 1);
+      }, segmentDuration);
+    }
+  }
+
+  /**
+   * Create agent element for multi-agent mode
+   * @param {string} agentId - Agent ID
+   * @param {Object} agentData - Agent data object
+   * @param {Object} screen - Screen coordinates
+   */
+  createMultiAgentElement(agentId, agentData, screen) {
+    const element = document.createElement('div');
+    element.className = 'agent-marker multi-agent';
+    element.style.position = 'absolute';
+    element.style.left = `${screen.x}px`;
+    element.style.top = `${screen.y}px`;
+    element.style.zIndex = '100';
+    
+    // Create emoji span
+    const emojiSpan = document.createElement('span');
+    emojiSpan.className = 'agent-emoji';
+    emojiSpan.textContent = '🛵';
+    element.appendChild(emojiSpan);
+    
+    // Create agent ID badge
+    const badge = document.createElement('div');
+    badge.className = 'agent-model-badge multi-agent-badge';
+    badge.style.backgroundColor = agentData.color;
+    badge.textContent = agentId.replace('agent_', '#');
+    element.appendChild(badge);
+    
+    this.container.appendChild(element);
+    agentData.element = element;
+    
+    return element;
   }
 
   /**
@@ -364,9 +571,10 @@ class MapRenderer {
    * Adds animation to queue to ensure sequential playback
    * @param {number} radiusKm - Search radius in kilometers (optional)
    * @param {Function} onComplete - Callback function to execute after animation completes
+   * @param {string} agentId - Agent ID for multi-agent mode (optional)
    */
-  showSonarAnimation(radiusKm, onComplete) {
-    this.sonarQueue.push({ radiusKm: radiusKm || 10, onComplete });
+  showSonarAnimation(radiusKm, onComplete, agentId) {
+    this.sonarQueue.push({ radiusKm: radiusKm || 10, onComplete, agentId });
     this.processNextSonar();
   }
   
@@ -383,14 +591,33 @@ class MapRenderer {
     const sonarData = this.sonarQueue.shift();
     const radiusKm = sonarData.radiusKm;
     const onComplete = sonarData.onComplete;
+    const agentId = sonarData.agentId;
     
-    if (!this.agentPosition || !this.agentElement) {
+    // Get agent position and element based on mode
+    let agentPosition = null;
+    let agentElement = null;
+    
+    if (this.isMultiAgentMode && agentId && this.agentElements.has(agentId)) {
+      const agentData = this.agentElements.get(agentId);
+      agentPosition = agentData.position;
+      agentElement = agentData.element;
+    } else if (this.isMultiAgentMode && this.agentElements.size > 0) {
+      // Use first agent if no agentId specified
+      const firstAgent = this.agentElements.values().next().value;
+      agentPosition = firstAgent.position;
+      agentElement = firstAgent.element;
+    } else {
+      agentPosition = this.agentPosition;
+      agentElement = this.agentElement;
+    }
+    
+    if (!agentPosition || !agentElement) {
       // Try next in queue
       this.processNextSonar();
       return;
     }
     
-    const agentNode = this.nodes.get(this.agentPosition);
+    const agentNode = this.nodes.get(agentPosition);
     if (!agentNode) {
       // Try next in queue
       this.processNextSonar();
@@ -435,11 +662,12 @@ class MapRenderer {
     this.currentSonarWave = sonarWave;
     
     // Update sonar position to follow agent element's actual position during movement
+    const targetElement = agentElement; // Capture the correct element
     const updateInterval = setInterval(() => {
-      if (this.agentElement && sonarWave.parentNode) {
+      if (targetElement && sonarWave.parentNode) {
         // Get agent element's current computed position (during animation)
-        const agentLeft = parseFloat(this.agentElement.style.left) || pos.x;
-        const agentTop = parseFloat(this.agentElement.style.top) || pos.y;
+        const agentLeft = parseFloat(targetElement.style.left) || pos.x;
+        const agentTop = parseFloat(targetElement.style.top) || pos.y;
         
         sonarWave.style.left = `${agentLeft}px`;
         sonarWave.style.top = `${agentTop}px`;
@@ -498,17 +726,50 @@ class MapRenderer {
   /**
    * Show critical hit animation near agent (game-style popup)
    * @param {string} emoji - Emoji to display (e.g., "➕🍱", "➖🍱", "➕🔋", "➕📋")
+   * @param {string} agentId - Optional agent ID for multi-agent mode
    */
-  showCriticalHitAnimation(emoji) {
+  showCriticalHitAnimation(emoji, agentId) {
     console.log('[MapRenderer] 🎯 showCriticalHitAnimation called with emoji:', emoji);
     console.log('[MapRenderer] Container exists:', !!this.container);
     console.log('[MapRenderer] Agent position:', this.agentPosition);
     console.log('[MapRenderer] Agent element exists:', !!this.agentElement);
+    console.log('[MapRenderer] Multi-agent mode:', this.isMultiAgentMode);
     
     // If agent element doesn't exist yet, try to get position from agentPosition
     let agentLeft, agentTop;
     
-    if (this.agentElement) {
+    // Multi-agent mode: get position from agentElements Map
+    if (this.isMultiAgentMode && this.agentElements.size > 0) {
+      // Try to get specific agent, or use first agent
+      let targetAgentData = null;
+      if (agentId && this.agentElements.has(agentId)) {
+        targetAgentData = this.agentElements.get(agentId);
+      } else {
+        // Use first agent with valid element
+        for (const [id, data] of this.agentElements) {
+          if (data.element) {
+            targetAgentData = data;
+            break;
+          }
+        }
+      }
+      
+      if (targetAgentData && targetAgentData.element) {
+        agentLeft = parseFloat(targetAgentData.element.style.left);
+        agentTop = parseFloat(targetAgentData.element.style.top);
+        console.log('[MapRenderer] ✅ Got position from multi-agent element:', agentLeft, agentTop);
+      } else if (targetAgentData && targetAgentData.position) {
+        // Fallback: calculate from node position
+        const agentNode = this.nodes.get(targetAgentData.position);
+        if (agentNode) {
+          const pos = this.worldToScreen(agentNode.x, agentNode.y);
+          agentLeft = pos.x;
+          agentTop = pos.y;
+          console.log('[MapRenderer] ✅ Calculated position from multi-agent node:', agentLeft, agentTop);
+        }
+      }
+    } else if (this.agentElement) {
+      // Single agent mode
       agentLeft = parseFloat(this.agentElement.style.left);
       agentTop = parseFloat(this.agentElement.style.top);
       console.log('[MapRenderer] ✅ Got position from agent element:', agentLeft, agentTop);
@@ -521,7 +782,10 @@ class MapRenderer {
       console.log('[MapRenderer] Position is NaN, calculating from node...');
       
       if (!this.agentPosition) {
-        console.error('[MapRenderer] ❌ Cannot show critical hit: no agent position');
+        // In multi-agent mode, this is expected - we already tried above
+        if (!this.isMultiAgentMode) {
+          console.error('[MapRenderer] ❌ Cannot show critical hit: no agent position');
+        }
         return;
       }
       
@@ -576,16 +840,29 @@ class MapRenderer {
    * @param {string} type - 'tool-call' or 'conversation'
    */
   showActionPanel(content, type = 'tool-call') {
-    if (!this.agentPosition || !this.agentElement) {
-      return;
+    let pos = null;
+    
+    // Multi-agent mode: get position from first agent
+    if (this.isMultiAgentMode && this.agentElements.size > 0) {
+      for (const [id, data] of this.agentElements) {
+        if (data.position) {
+          const agentNode = this.nodes.get(data.position);
+          if (agentNode) {
+            pos = this.worldToScreen(agentNode.x, agentNode.y);
+            break;
+          }
+        }
+      }
+    } else if (this.agentPosition) {
+      const agentNode = this.nodes.get(this.agentPosition);
+      if (agentNode) {
+        pos = this.worldToScreen(agentNode.x, agentNode.y);
+      }
     }
     
-    const agentNode = this.nodes.get(this.agentPosition);
-    if (!agentNode) {
+    if (!pos) {
       return;
     }
-    
-    const pos = this.worldToScreen(agentNode.x, agentNode.y);
     
     // Make all existing panels of the same type semi-transparent (85%)
     this.actionPanels.forEach(panelData => {
@@ -1206,8 +1483,37 @@ class MapRenderer {
       });
     }
     
-    // Render or update agent marker
-    if (this.agentPosition) {
+    // Render or update agent marker(s)
+    if (this.isMultiAgentMode) {
+      // Multi-agent mode: render all agents
+      this.agentElements.forEach((agentData, agentId) => {
+        if (!agentData.position) return;
+        
+        const agentNode = this.nodes.get(agentData.position);
+        if (!agentNode) return;
+        
+        const screen = this.worldToScreen(agentNode.x, agentNode.y);
+        
+        if (!agentData.element) {
+          // Create new agent element
+          this.createMultiAgentElement(agentId, agentData, screen);
+        } else if (!agentData.isAnimating) {
+          // Update position only if not animating (avoid overwriting animation)
+          agentData.element.style.left = `${screen.x}px`;
+          agentData.element.style.top = `${screen.y}px`;
+        }
+      });
+      
+      // Set first agent element as the main agentElement for ActionMenu/ReceiptPanel compatibility
+      if (!this.agentElement && this.agentElements.size > 0) {
+        const firstAgent = this.agentElements.values().next().value;
+        if (firstAgent && firstAgent.element) {
+          this.agentElement = firstAgent.element;
+          this.agentPosition = firstAgent.position;
+        }
+      }
+    } else if (this.agentPosition) {
+      // Single agent mode (Level 1/2)
       const agentNode = this.nodes.get(this.agentPosition);
       if (agentNode) {
         const screen = this.worldToScreen(agentNode.x, agentNode.y);

@@ -338,6 +338,58 @@ class StatsPanel {
   }
   
   /**
+   * Update statistics display for multi-agent mode (Level 3)
+   * @param {Array} allAgentStates - Array of all agent states
+   * @param {string} formattedTime - Formatted time string
+   * @param {number} currentIteration - Current iteration number
+   * @param {number} maxIterations - Maximum iteration number
+   * @param {number} lastTotalTokens - Last call total tokens
+   * @param {number} cumulativeTotalTokens - Cumulative total tokens
+   * @param {number} currentTime - Current game time in minutes
+   */
+  updateMultiAgent(allAgentStates, formattedTime, currentIteration, maxIterations, lastTotalTokens, cumulativeTotalTokens, currentTime) {
+    // Calculate totals across all agents
+    let totalProfit = 0;
+    let totalCompleted = 0;
+    let totalCarried = 0;
+    let totalWeight = 0;
+    let avgBattery = 0;
+    
+    if (allAgentStates && allAgentStates.length > 0) {
+      allAgentStates.forEach(agent => {
+        totalProfit += agent.profit || 0;
+        totalCompleted += agent.completedOrders || 0;
+        totalCarried += (agent.carriedOrders || []).length;
+        totalWeight += agent.totalWeight || 0;
+        avgBattery += agent.battery || 0;
+      });
+      avgBattery = avgBattery / allAgentStates.length;
+    }
+    
+    // Create a synthetic agentState for display
+    const syntheticAgentState = {
+      battery: avgBattery,
+      profit: totalProfit,
+      carriedOrders: [], // Don't show individual orders in multi-agent mode
+      totalWeight: totalWeight,
+      completedOrders: totalCompleted
+    };
+    
+    // Use the regular update method with synthetic state
+    this.update(syntheticAgentState, formattedTime, currentIteration, maxIterations, lastTotalTokens, cumulativeTotalTokens, currentTime);
+    
+    // Update carried orders to show count from all agents
+    if (this.elements.carried) {
+      const newValue = totalCarried;
+      const oldValue = this.previousValues.carried || 0;
+      if (newValue !== oldValue) {
+        this.animateNumberChange(this.elements.carried, oldValue, newValue, 0);
+        this.previousValues.carried = newValue;
+      }
+    }
+  }
+  
+  /**
    * Animate number change with counting effect
    * @param {HTMLElement} element - Element to update
    * @param {number} from - Starting value
