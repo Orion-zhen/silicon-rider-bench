@@ -27,6 +27,7 @@ class ReceiptPanel {
     // Timers
     this.hideTimer = null;
     this.removeImageTimer = null;
+    this.removeInterferenceTimer = null;
     
     // Initialize
     this.initialize();
@@ -165,14 +166,19 @@ class ReceiptPanel {
   
   /**
    * Render the panel content
+   * Supports horizontal layout for multiple receipts (including interference receipts)
    */
   render() {
     const receiptsHTML = this.receipts.map((receipt, index) => {
       const imageSrc = receipt.imageData || '';
+      const isInterference = receipt.isInterference || false;
+      const interferenceClass = isInterference ? 'interference' : '';
+      // For display purposes, hide "interference_" prefix from order ID
+      const displayOrderId = receipt.orderId.replace(/^interference_/, '');
       return `
-        <div class="receipt-image-item" data-order-id="${receipt.orderId}">
+        <div class="receipt-image-item ${interferenceClass}" data-order-id="${receipt.orderId}" data-is-interference="${isInterference}">
           <img src="${imageSrc}" alt="小票 ${index + 1}" class="receipt-image" />
-          <div class="receipt-order-id">${receipt.orderId}</div>
+          <div class="receipt-order-id">${displayOrderId}</div>
         </div>
       `;
     }).join('');
@@ -203,8 +209,28 @@ class ReceiptPanel {
       // Remove this receipt after 2 seconds
       this.removeImageTimer = setTimeout(() => {
         this.removeReceipt(orderId);
+        
+        // Remove remaining interference receipts after additional 1 seconds (3 seconds total from selection)
+        this.removeInterferenceTimer = setTimeout(() => {
+          this.removeAllInterferenceReceipts();
+        }, 1000);
       }, 2000);
     }
+  }
+  
+  /**
+   * Remove all interference receipts from the panel
+   */
+  removeAllInterferenceReceipts() {
+    // Find all interference receipts
+    const interferenceItems = this.panelElement.querySelectorAll('.receipt-image-item.interference');
+    
+    interferenceItems.forEach(item => {
+      const orderId = item.dataset.orderId;
+      if (orderId) {
+        this.removeReceipt(orderId);
+      }
+    });
   }
   
   /**
@@ -258,14 +284,11 @@ class ReceiptPanel {
   
   /**
    * Schedule panel to hide (when move_to is called)
-   * Hides after 2 second delay
+   * Hides immediately as a fallback mechanism
    */
   scheduleHide() {
     this.clearTimers();
-    
-    this.hideTimer = setTimeout(() => {
-      this.hide();
-    }, 2000);
+    this.hide();
   }
   
   /**
@@ -291,6 +314,11 @@ class ReceiptPanel {
     if (this.removeImageTimer) {
       clearTimeout(this.removeImageTimer);
       this.removeImageTimer = null;
+    }
+    
+    if (this.removeInterferenceTimer) {
+      clearTimeout(this.removeInterferenceTimer);
+      this.removeInterferenceTimer = null;
     }
   }
   

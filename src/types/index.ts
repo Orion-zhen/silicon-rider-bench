@@ -363,6 +363,7 @@ export interface GetReceiptsResponse {
     orderId: string;
     imagePath: string;
     imageData?: string;  // base64 encoded image or file:// URL
+    isInterference?: boolean;  // true if this is an interference receipt (for frontend display only)
   }>;
   message?: string;
 }

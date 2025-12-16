@@ -480,6 +480,18 @@ class ActionMenu {
     marqueeElement.textContent = cleanContent;
     marqueeElement.classList.remove('scrolling');
     
+    // Calculate animation duration based on content length
+    // Max speed: 20 characters per second
+    // The marquee needs to scroll: container width (20ch) + content length
+    // So total distance in characters is roughly: 20 + content.length
+    const maxCharsPerSecond = 10;
+    const containerWidthChars = 20; // .action-marquee-container width is 20ch
+    const totalScrollChars = containerWidthChars + cleanContent.length;
+    const animationDuration = Math.max(2, totalScrollChars / maxCharsPerSecond); // minimum 2 seconds
+    
+    // Set custom animation duration
+    marqueeElement.style.animationDuration = `${animationDuration}s`;
+    
     // Force reflow to restart animation
     void marqueeElement.offsetWidth;
     marqueeElement.classList.add('scrolling');

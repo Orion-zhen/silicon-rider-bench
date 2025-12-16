@@ -314,6 +314,73 @@ export class AIClient {
   }
 
   /**
+   * 从对话历史中移除指定订单的小票图片 - 优化 V2/V3 模式的上下文大小
+   * 
+   * 当 pickup_food_by_phone_number 成功后调用，移除已经不需要的图片数据以节省 token
+   * 这对于 Level 2 和 Level 3 测试特别重要，因为图片数据会占用大量上下文空间
+   * 
+   * @param orderId 已成功取餐的订单 ID
+   */
+  private removeReceiptImageFromHistory(orderId: string): void {
+    // 遍历对话历史，查找并处理多模态消息
+    for (let i = this.conversationHistory.length - 1; i >= 0; i--) {
+      const msg = this.conversationHistory[i];
+      
+      // 只处理 user 角色的多模态消息（图片消息是以 user 身份添加的）
+      if (msg.role !== 'user' || !Array.isArray(msg.content)) {
+        continue;
+      }
+
+      const contentItems = msg.content as MultimodalContentItem[];
+      
+      // 查找是否包含目标订单的图片
+      let foundOrderIndex = -1;
+      for (let j = 0; j < contentItems.length; j++) {
+        const item = contentItems[j];
+        if (item.type === 'text' && item.text?.includes(`订单 ${orderId} 的小票`)) {
+          foundOrderIndex = j;
+          break;
+        }
+      }
+
+      if (foundOrderIndex === -1) {
+        continue;
+      }
+
+      // 找到了目标订单，移除对应的图片和文本
+      // 图片在文本之前，所以需要移除 foundOrderIndex 和 foundOrderIndex - 1
+      const itemsToRemove: number[] = [];
+      
+      // 添加文本标签
+      itemsToRemove.push(foundOrderIndex);
+      
+      // 添加图片（在文本之前）
+      if (foundOrderIndex > 0 && contentItems[foundOrderIndex - 1].type === 'image_url') {
+        itemsToRemove.push(foundOrderIndex - 1);
+      }
+
+      // 从后往前删除，避免索引偏移问题
+      itemsToRemove.sort((a, b) => b - a);
+      for (const idx of itemsToRemove) {
+        contentItems.splice(idx, 1);
+      }
+
+      console.log(`[AI Client] Removed receipt image for order ${orderId} from history (optimization)`);
+
+      // 检查是否还有图片内容，如果只剩下说明文字，可以考虑移除整个消息
+      const hasImages = contentItems.some(item => item.type === 'image_url');
+      if (!hasImages) {
+        // 没有图片了，移除整个多模态消息
+        this.conversationHistory.splice(i, 1);
+        console.log(`[AI Client] Removed empty multimodal message from history`);
+      }
+
+      // 找到并处理了目标订单，可以退出
+      break;
+    }
+  }
+
+  /**
    * 运行对话循环
    * 需求：16.2, 16.3, 16.4
    * 
@@ -341,7 +408,6 @@ export class AIClient {
 
         // 根据配置限制历史消息数量
         // 保留 system 消息（通常是第一条），只限制非 system 消息
-        let messagesToSend = this.conversationHistory;
         const historyLimit = this.config.contextHistoryLimit;
         
         if (historyLimit && historyLimit > 0) {
@@ -353,10 +419,13 @@ export class AIClient {
           if (nonSystemMessages.length > historyLimit) {
             // 保留最近的 historyLimit 条非 system 消息
             const recentMessages = nonSystemMessages.slice(-historyLimit);
-            // 合并 system 消息和最近的非 system 消息
-            messagesToSend = [...systemMessages, ...recentMessages];
+            // 合并 system 消息和最近的非 system 消息，并更新实际的历史记录
+            this.conversationHistory = [...systemMessages, ...recentMessages];
+            console.log(`[AI Client] History limit reached. Trimmed to ${historyLimit} non-system messages (removed ${nonSystemMessages.length - historyLimit} oldest messages)`);
           }
         }
+        
+        const messagesToSend = this.conversationHistory;
 
         // 清理消息，确保所有 content 都是字符串或有效的多模态数组
         // 这是为了兼容 llama.cpp 等服务器的聊天模板，它们可能无法处理 null 或空 content
@@ -628,6 +697,12 @@ export class AIClient {
             // V2 模式：如果是 get_receipts 工具，添加多模态消息让 AI 看到图片
             if (result.toolName === 'get_receipts' && result.result.success && result.result.data?.receipts) {
               this.addMultimodalReceiptMessage(result.result.data.receipts);
+            }
+
+            // V2/V3 模式：如果是 pickup_food_by_phone_number 成功，移除对应的图片以节省上下文
+            // 这对于 Level 2 和 Level 3 测试特别重要，因为图片数据会占用大量上下文空间
+            if (result.toolName === 'pickup_food_by_phone_number' && result.result.success && result.result.data?.orderId) {
+              this.removeReceiptImageFromHistory(result.result.data.orderId);
             }
 
             // 发送工具结果到 Web 客户端

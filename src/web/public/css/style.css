@@ -2911,7 +2911,7 @@ a:focus,
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
     min-width: 160px;
-    max-width: 200px;
+    max-width: 800px;
     pointer-events: auto;
     animation: receipt-panel-appear 0.3s ease-out;
 }
@@ -2960,10 +2960,12 @@ a:focus,
 .receipt-panel-content {
     padding: var(--spacing-sm);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: var(--spacing-sm);
-    max-height: 300px;
+    max-height: 400px;
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .receipt-image-item {
@@ -2972,6 +2974,8 @@ a:focus,
     overflow: hidden;
     transition: all 0.3s ease;
     border: 2px solid transparent;
+    flex: 0 0 auto;
+    width: 140px;
 }
 
 .receipt-image-item:hover {
@@ -3031,6 +3035,11 @@ a:focus,
     font-weight: 500;
 }
 
+/* Interference receipt indicator (for debugging/development only) */
+.receipt-image-item.interference {
+    opacity: 0.95;
+}
+
 /* ===================================
    20. Multi-Agent Cards Styles (Level 3)
    =================================== */
@@ -3044,15 +3053,17 @@ a:focus,
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0; /* Allow flex shrinking */
 }
 
 .multi-agent-cards-container {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
-    overflow-y: auto;
+    overflow: hidden; /* Changed from overflow-y: auto */
     flex: 1;
     padding: var(--spacing-sm);
+    min-height: 0; /* Allow flex shrinking */
 }
 
 /* ===================================
@@ -3064,6 +3075,7 @@ a:focus,
     display: flex;
     overflow: hidden;
     transition: all 0.2s ease;
+    flex-shrink: 0; /* Prevent status cards from shrinking */
 }
 
 .agent-status-card:hover {
@@ -3195,6 +3207,11 @@ a:focus,
     margin-top: var(--spacing-sm);
     padding-top: var(--spacing-sm);
     border-top: 1px solid var(--border-light);
+    flex: 1;
+    min-height: 0; /* Allow flex shrinking */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .carried-orders-header {
@@ -3221,6 +3238,9 @@ a:focus,
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs);
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0; /* Allow flex shrinking */
 }
 
 /* Order Detail Card */
@@ -3373,12 +3393,12 @@ a:focus,
 
 .multi-agent-badge {
     position: absolute;
-    bottom: -20px;
+    bottom: -50px;
     left: 50%;
     transform: translateX(-50%);
-    padding: 2px 6px;
+    padding: 3px 10px;
     border-radius: var(--radius-sm);
-    font-size: 0.65rem;
+    font-size: 1.3rem;
     font-weight: 700;
     color: var(--text-light);
     white-space: nowrap;

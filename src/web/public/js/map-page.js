@@ -29,7 +29,7 @@ function renderMapPage() {
         <div class="map-dashboard-section">
           <div class="map-page-section-header">
             <span class="section-icon">🎮</span>
-            <span class="section-title">游戏状态</span>
+            <span class="section-title">模拟状态</span>
             <span class="model-name-badge" id="map-model-name">--</span>
           </div>
           <div class="dashboard-grid">

@@ -30,7 +30,7 @@ const i18n = {
       'home.waitingAI': '🤖 等待 AI 代理启动...',
       
       // Stats Panel
-      'stats.gameStatus': '游戏状态',
+      'stats.gameStatus': '模拟状态',
       'stats.connection': '连接',
       'stats.connected': '已连接',
       'stats.disconnected': '已断开',

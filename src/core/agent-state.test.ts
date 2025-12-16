@@ -233,7 +233,7 @@ describe('AgentState', () => {
      * Feature: silicon-rider-bench, Property 5: 状态查询完整性
      * 验证：需求 4.1-4.5
      * 
-     * 对于任意游戏状态，调用 get_my_status 应该返回包含位置、电量、
+     * 对于任意模拟状态，调用 get_my_status 应该返回包含位置、电量、
      * 订单列表、重量、承载能力和当前时间的完整信息
      */
     it('属性 5: 状态查询完整性', () => {

@@ -427,8 +427,70 @@ export const swapBatteryTool: ToolDefinition = {
 };
 
 /**
+ * Interface for interference receipt data from dataset.json
+ */
+interface InterferenceOrder {
+  order_id: string;
+  image_filename: string;
+  phone_number: string;
+  food_items: Array<{ name: string; price: number }>;
+  total_price: number;
+}
+
+interface InterferenceDataset {
+  metadata: {
+    version: string;
+    created_at: string;
+    total_orders: number;
+    source: string;
+  };
+  orders: InterferenceOrder[];
+}
+
+// Cache for interference dataset
+let interferenceDataCache: InterferenceDataset | null = null;
+
+/**
+ * Load interference receipt dataset
+ */
+function loadInterferenceData(): InterferenceDataset | null {
+  if (interferenceDataCache) {
+    return interferenceDataCache;
+  }
+  
+  const datasetPath = path.join(__dirname, '..', 'data', 'synthetic_receipt_interference data', 'dataset.json');
+  
+  if (!fs.existsSync(datasetPath)) {
+    console.warn(`Interference dataset not found at: ${datasetPath}`);
+    return null;
+  }
+  
+  try {
+    const dataContent = fs.readFileSync(datasetPath, 'utf-8');
+    interferenceDataCache = JSON.parse(dataContent) as InterferenceDataset;
+    return interferenceDataCache;
+  } catch (error) {
+    console.error(`Failed to load interference dataset: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * Shuffle an array using Fisher-Yates algorithm
+ */
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+/**
  * Get receipts at a location (V2 mode only)
  * Returns receipt images for all orders that need to be picked up at the specified location
+ * In Level 2 and Level 3 modes, also includes 1-3 interference receipts to test AI's ability to identify the correct receipt
  */
 export const getReceiptsTool: ToolDefinition = {
   name: 'get_receipts',
@@ -490,7 +552,7 @@ export const getReceiptsTool: ToolDefinition = {
     const imageTransportMode: ImageTransportMode = 
       (process.env.IMAGE_TRANSPORT_MODE as ImageTransportMode) || 'base64';
 
-    // Build receipts response
+    // Build receipts response - real receipts
     const receipts: GetReceiptsResponse['receipts'] = [];
     const dataDir = path.join(__dirname, '..', 'data', 'synthetic_receipt_data');
 
@@ -505,7 +567,7 @@ export const getReceiptsTool: ToolDefinition = {
         if (fs.existsSync(absolutePath)) {
           const imageBuffer = fs.readFileSync(absolutePath);
           const base64Data = imageBuffer.toString('base64');
-          imageData = `data:image/jpeg;base64,${base64Data}`;
+          imageData = `data:image/png;base64,${base64Data}`;
         }
       } else {
         // Use file:// URL format
@@ -516,14 +578,75 @@ export const getReceiptsTool: ToolDefinition = {
         orderId: order.id,
         imagePath: order.receiptImagePath!,
         imageData,
+        isInterference: false,
       });
     }
+
+    // Add interference receipts (0-3 random receipts from interference dataset)
+    // Probability distribution: 0 items: 15%, 1 item: 50%, 2 items: 25%, 3 items: 10%
+    const interferenceData = loadInterferenceData();
+    if (interferenceData && interferenceData.orders.length > 0) {
+      const interferenceDir = path.join(__dirname, '..', 'data', 'synthetic_receipt_interference data');
+      
+      // Weighted random selection for interference count
+      // 0: 15%, 1: 50%, 2: 25%, 3: 10%
+      const roll = Math.random() * 100;
+      let interferenceCount: number;
+      if (roll < 50) {
+        interferenceCount = 0;  // 50% chance
+      } else if (roll < 75) {
+        interferenceCount = 1;  // 25% chance (15-65)
+      } else if (roll < 90) {
+        interferenceCount = 2;  // 15% chance (65-90)
+      } else {
+        interferenceCount = 3;  // 10% chance (90-100)
+      }
+      
+      const availableOrders = [...interferenceData.orders];
+      const selectedOrders: InterferenceOrder[] = [];
+      
+      for (let i = 0; i < Math.min(interferenceCount, availableOrders.length); i++) {
+        const randomIndex = Math.floor(Math.random() * availableOrders.length);
+        selectedOrders.push(availableOrders[randomIndex]);
+        availableOrders.splice(randomIndex, 1);
+      }
+      
+      // Add interference receipts to the list
+      for (const interferenceOrder of selectedOrders) {
+        const imagePath = path.join(interferenceDir, interferenceOrder.image_filename);
+        const absolutePath = path.resolve(imagePath);
+        
+        let imageData: string | undefined;
+        
+        if (imageTransportMode === 'base64') {
+          if (fs.existsSync(absolutePath)) {
+            const imageBuffer = fs.readFileSync(absolutePath);
+            const base64Data = imageBuffer.toString('base64');
+            imageData = `data:image/png;base64,${base64Data}`;
+          }
+        } else {
+          imageData = `file://${absolutePath}`;
+        }
+        
+        if (imageData) {
+          receipts.push({
+            orderId: `interference_${interferenceOrder.order_id}`,
+            imagePath: interferenceOrder.image_filename,
+            imageData,
+            isInterference: true,
+          });
+        }
+      }
+    }
+    
+    // Shuffle all receipts to mix real and interference receipts
+    const shuffledReceipts = shuffleArray(receipts);
 
     return {
       success: true,
       data: {
-        receipts,
-        message: `Found ${receipts.length} receipt(s) at ${targetLocationId}. Please identify the phone numbers from the receipt images.`,
+        receipts: shuffledReceipts,
+        message: `Found ${shuffledReceipts.length} receipt(s) at ${targetLocationId}. Note: There may be multiple receipts from different orders. Please carefully identify the phone numbers from YOUR order's receipt images.`,
       },
     };
   },
