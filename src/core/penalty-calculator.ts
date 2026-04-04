@@ -10,10 +10,11 @@ import { Payment } from '../types';
  * 需求：9.2, 9.3, 22.1-22.5
  * 
  * 惩罚规则：
- * - 0-5分钟（含）：不扣款（0%）
- * - 5分钟（不含）-10分钟（含）：扣除 30%
- * - 10分钟（不含）-15分钟（含）：扣除 50%
- * - 15分钟以上：扣除 70%
+ * - 未超时（0分钟）：不扣款（0%）
+ * - 超时0（不含）-5分钟（含）：扣除 30%
+ * - 5分钟（不含）-10分钟（含）：扣除 50%
+ * - 10分钟（不含）-20分钟（含）：扣除所有配送费（100%）
+ * - 20分钟以上：扣除100%并在不挣钱基础上额外罚款10元
  * 
  * @param deliveryFee 订单配送费（元）
  * @param deadline 订单截止时间（游戏时间，分钟）
@@ -28,25 +29,30 @@ export function calculatePayment(
   // 计算超时时长（分钟）
   const overtime = Math.max(0, deliveryTime - deadline);
   
-  // 根据超时时长确定惩罚比例
+  // 根据超时时长确定惩罚比例和固定罚款
   let penaltyRate = 0;
+  let fixedPenalty = 0;
   
-  if (overtime <= 5) {
-    // 0-5分钟（含）：不扣款
+  if (overtime === 0) {
+    // 准时或提前：不扣款
     penaltyRate = 0;
-  } else if (overtime <= 10) {
-    // 5分钟（不含）-10分钟（含）：扣除 30%
+  } else if (overtime <= 5) {
+    // 超时0-5分钟（含）：扣除 30%
     penaltyRate = 0.3;
-  } else if (overtime <= 15) {
-    // 10分钟（不含）-15分钟（含）：扣除 50%
+  } else if (overtime <= 10) {
+    // 5分钟（不含）-10分钟（含）：扣除 50%
     penaltyRate = 0.5;
+  } else if (overtime <= 20) {
+    // 10分钟（不含）-20分钟（含）：扣除 100%
+    penaltyRate = 1.0;
   } else {
-    // 15分钟以上：扣除 70%
-    penaltyRate = 0.7;
+    // 20分钟以上：扣除 100%，额外罚款 10 元
+    penaltyRate = 1.0;
+    fixedPenalty = 10;
   }
   
   // 计算惩罚金额
-  const penalty = deliveryFee * penaltyRate;
+  const penalty = deliveryFee * penaltyRate + fixedPenalty;
   
   // 计算最终支付金额
   const payment = deliveryFee - penalty;
