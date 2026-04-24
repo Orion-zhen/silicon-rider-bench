@@ -80,6 +80,8 @@ export interface ChatMessage {
   content: string | MultimodalContentItem[];
   tool_call_id?: string;
   name?: string;
+  tool_calls?: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[];
+  reasoning_content?: string;
 }
 
 /**
@@ -410,22 +412,7 @@ export class AIClient {
         // 保留 system 消息（通常是第一条），只限制非 system 消息
         const historyLimit = this.config.contextHistoryLimit;
         
-        if (historyLimit && historyLimit > 0) {
-          // 分离 system 消息和非 system 消息
-          const systemMessages = this.conversationHistory.filter(msg => msg.role === 'system');
-          const nonSystemMessages = this.conversationHistory.filter(msg => msg.role !== 'system');
-          
-          // 只有当非 system 消息数量 > historyLimit 时才进行截取
-          if (nonSystemMessages.length > historyLimit) {
-            // 保留最近的 historyLimit 条非 system 消息
-            const recentMessages = nonSystemMessages.slice(-historyLimit);
-            // 合并 system 消息和最近的非 system 消息，并更新实际的历史记录
-            this.conversationHistory = [...systemMessages, ...recentMessages];
-            console.log(`[AI Client] History limit reached. Trimmed to ${historyLimit} non-system messages (removed ${nonSystemMessages.length - historyLimit} oldest messages)`);
-          }
-        }
-        
-        const messagesToSend = this.conversationHistory;
+        const messagesToSend = this.prepareConversationHistoryForRequest(historyLimit);
 
         // 清理消息，确保所有 content 都是字符串或有效的多模态数组
         // 这是为了兼容 llama.cpp 等服务器的聊天模板，它们可能无法处理 null 或空 content
@@ -775,6 +762,70 @@ export class AIClient {
     if (!isUnlimited && iteration >= maxIterations) {
       console.warn(`Reached maximum iterations (${maxIterations})`);
     }
+  }
+
+  /**
+   * 在发送请求前整理历史记录，避免产生孤立的 tool 消息。
+   *
+   * 某些兼容 OpenAI API 的服务（例如 DeepSeek）会严格校验：
+   * tool 消息必须紧跟在带 tool_calls 的 assistant 回合之后。
+   * 如果 contextHistoryLimit 恰好把 assistant 截掉，只留下 tool，就会触发 400。
+   */
+  private prepareConversationHistoryForRequest(historyLimit?: number): ChatMessage[] {
+    const systemMessages = this.conversationHistory.filter(msg => msg.role === 'system');
+    const nonSystemMessages = this.conversationHistory.filter(msg => msg.role !== 'system');
+
+    let recentMessages = nonSystemMessages;
+    if (historyLimit && historyLimit > 0 && nonSystemMessages.length > historyLimit) {
+      recentMessages = nonSystemMessages.slice(-historyLimit);
+    }
+
+    const repairedMessages = this.removeInvalidToolMessages(recentMessages);
+    const removedCount = nonSystemMessages.length - repairedMessages.length;
+
+    if (historyLimit && historyLimit > 0 && nonSystemMessages.length > historyLimit) {
+      console.log(
+        `[AI Client] History limit reached. Trimmed to ${repairedMessages.length} valid non-system messages ` +
+        `(requested limit ${historyLimit}, removed ${removedCount} old/invalid messages)`
+      );
+    } else if (repairedMessages.length !== nonSystemMessages.length) {
+      console.warn(
+        `[AI Client] Removed ${nonSystemMessages.length - repairedMessages.length} invalid tool message(s) from conversation history`
+      );
+    }
+
+    this.conversationHistory = [...systemMessages, ...repairedMessages];
+    return this.conversationHistory;
+  }
+
+  /**
+   * 删除不合法的 tool 消息，确保每个 tool 都能在当前历史里找到对应的 assistant.tool_calls。
+   */
+  private removeInvalidToolMessages(messages: ChatMessage[]): ChatMessage[] {
+    const repaired: ChatMessage[] = [];
+    let activeToolCallIds: Set<string> | null = null;
+
+    for (const message of messages) {
+      if (message.role === 'assistant') {
+        repaired.push(message);
+        activeToolCallIds = message.tool_calls && message.tool_calls.length > 0
+          ? new Set(message.tool_calls.map(toolCall => toolCall.id))
+          : null;
+        continue;
+      }
+
+      if (message.role === 'tool') {
+        if (activeToolCallIds && message.tool_call_id && activeToolCallIds.has(message.tool_call_id)) {
+          repaired.push(message);
+        }
+        continue;
+      }
+
+      repaired.push(message);
+      activeToolCallIds = null;
+    }
+
+    return repaired;
   }
 
   /**

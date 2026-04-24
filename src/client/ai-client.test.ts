@@ -173,6 +173,94 @@ describe('AIClient', () => {
       expect(history[2].role).toBe('user');
       expect(history[2].content).toBe('User message 2');
     });
+
+    it('should preserve valid assistant-tool sequences when preparing request history', () => {
+      const client = createAIClient(simulator, {
+        apiKey: 'test-key',
+        contextHistoryLimit: 3,
+      });
+
+      client.initializeConversation('System prompt');
+
+      (client as any).conversationHistory = [
+        { role: 'system', content: 'System prompt' },
+        { role: 'user', content: 'Earlier user message' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: {
+                name: 'get_my_status',
+                arguments: '{}',
+              },
+            },
+            {
+              id: 'call_2',
+              type: 'function',
+              function: {
+                name: 'help',
+                arguments: '{}',
+              },
+            },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call_1', name: 'get_my_status', content: '{"success":true}' },
+        { role: 'tool', tool_call_id: 'call_2', name: 'help', content: '{"success":true}' },
+      ];
+
+      const prepared = (client as any).prepareConversationHistoryForRequest(3);
+
+      expect(prepared).toHaveLength(4);
+      expect(prepared.map((msg: any) => msg.role)).toEqual(['system', 'assistant', 'tool', 'tool']);
+      expect(prepared[1].tool_calls).toHaveLength(2);
+    });
+
+    it('should drop orphaned tool messages when history trimming cuts off the assistant tool call', () => {
+      const client = createAIClient(simulator, {
+        apiKey: 'test-key',
+        contextHistoryLimit: 2,
+      });
+
+      client.initializeConversation('System prompt');
+
+      (client as any).conversationHistory = [
+        { role: 'system', content: 'System prompt' },
+        { role: 'user', content: 'Earlier user message' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: {
+                name: 'get_my_status',
+                arguments: '{}',
+              },
+            },
+            {
+              id: 'call_2',
+              type: 'function',
+              function: {
+                name: 'help',
+                arguments: '{}',
+              },
+            },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call_1', name: 'get_my_status', content: '{"success":true}' },
+        { role: 'tool', tool_call_id: 'call_2', name: 'help', content: '{"success":true}' },
+      ];
+
+      const prepared = (client as any).prepareConversationHistoryForRequest(2);
+
+      expect(prepared).toHaveLength(1);
+      expect(prepared[0].role).toBe('system');
+      expect(prepared.some((msg: any) => msg.role === 'tool')).toBe(false);
+    });
   });
 
   describe('System Prompt Generation', () => {
